@@ -5,6 +5,7 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import dev.sirius.cloud.api.logging.CloudLogger;
+import dev.sirius.cloud.driver.paper.PaperVersionCatalog;
 
 import java.io.IOException;
 import java.net.URI;
@@ -53,9 +54,11 @@ public final class PaperMcJarProvider implements JarProvider {
             .build();
 
     private final Path cacheDirectory;
+    private final PaperVersionCatalog catalog;
 
-    public PaperMcJarProvider(Path jarDirectory) {
+    public PaperMcJarProvider(Path jarDirectory, PaperVersionCatalog catalog) {
         this.cacheDirectory = jarDirectory.resolve("cache");
+        this.catalog = catalog;
     }
 
     @Override
@@ -64,8 +67,13 @@ public final class PaperMcJarProvider implements JarProvider {
     }
 
     @Override
-    public Path resolve(String version, String build) throws IOException {
+    public Path resolve(String requestedVersion, String build) throws IOException {
         Files.createDirectories(cacheDirectory);
+
+        // Turns "latest" into a concrete version and rejects anything PaperMC
+        // does not publish, so a typo in a group config fails with the list of
+        // valid versions rather than a bare 404 from the download endpoint.
+        String version = catalog.resolve(requestedVersion);
 
         Integer requested = "latest".equalsIgnoreCase(build) ? null : parseBuild(build);
 

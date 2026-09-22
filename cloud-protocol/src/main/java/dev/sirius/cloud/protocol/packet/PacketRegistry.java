@@ -2,7 +2,9 @@ package dev.sirius.cloud.protocol.packet;
 
 import dev.sirius.cloud.protocol.packet.impl.AcknowledgePacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleCommandPacket;
+import dev.sirius.cloud.protocol.packet.impl.ConsoleHistoryPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleLinePacket;
+import dev.sirius.cloud.protocol.packet.impl.ConsoleSubscribePacket;
 import dev.sirius.cloud.protocol.packet.impl.GroupListRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.GroupListResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
@@ -82,11 +84,13 @@ public final class PacketRegistry {
                 .register(0x10, ServiceStartPacket.class, ServiceStartPacket::new)
                 .register(0x11, ServiceStopPacket.class, ServiceStopPacket::new)
                 .register(0x12, ConsoleCommandPacket.class, ConsoleCommandPacket::new)
+                .register(0x13, ConsoleSubscribePacket.class, ConsoleSubscribePacket::new)
 
                 // 0x20-0x2F — wrapper/service to node
                 .register(0x20, ServiceStateUpdatePacket.class, ServiceStateUpdatePacket::new)
                 .register(0x21, ServiceReadyPacket.class, ServiceReadyPacket::new)
                 .register(0x22, ConsoleLinePacket.class, ConsoleLinePacket::new)
+                .register(0x23, ConsoleHistoryPacket.class, ConsoleHistoryPacket::new)
 
                 // 0x30-0x3F — driver queries
                 .register(0x30, ServiceListRequestPacket.class, ServiceListRequestPacket::new)

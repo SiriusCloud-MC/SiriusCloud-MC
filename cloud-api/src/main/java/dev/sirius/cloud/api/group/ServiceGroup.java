@@ -35,11 +35,27 @@ public final class ServiceGroup {
     /** First port of this group's range; services take the next free one. */
     private int startPort = 41000;
 
-    /** Minecraft version, e.g. {@code 1.21.4}. */
-    private String version = "1.21.4";
+    /**
+     * Minecraft version, e.g. {@code 1.21.4}, or {@code latest}.
+     *
+     * <p>Whatever PaperMC currently publishes is valid — the list is fetched
+     * from their API rather than hardcoded, so new releases work without a
+     * code change. Run {@code versions} in the node console to see the list.
+     */
+    private String version = "latest";
 
     /** Paper build number, or {@code latest}. */
     private String build = "latest";
+
+    /**
+     * JVM to run this group's services with. Empty uses the wrapper's default.
+     *
+     * <p>Exists because the supported version range spans Minecraft releases
+     * with different minimum Java versions: a group pinned to an older release
+     * and a group on the newest one may genuinely need different JDKs on the
+     * same machine.
+     */
+    private String javaExecutable = "";
 
     /** Required by the JSON codec. */
     @SuppressWarnings("unused")
@@ -113,11 +129,16 @@ public final class ServiceGroup {
     }
 
     public String version() {
-        return version;
+        return version == null || version.isBlank() ? "latest" : version;
     }
 
     public String build() {
         return build == null || build.isBlank() ? "latest" : build;
+    }
+
+    /** Empty when the wrapper's configured JVM should be used. */
+    public String javaExecutable() {
+        return javaExecutable == null ? "" : javaExecutable;
     }
 
     @Override

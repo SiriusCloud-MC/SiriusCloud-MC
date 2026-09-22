@@ -12,6 +12,7 @@ import dev.sirius.cloud.node.group.GroupRegistry;
 import dev.sirius.cloud.node.service.ServiceManager;
 import dev.sirius.cloud.node.service.ServiceRegistry;
 import dev.sirius.cloud.node.wrapper.ConnectedWrapper;
+import dev.sirius.cloud.node.console.NodeConsole;
 import dev.sirius.cloud.node.wrapper.WrapperRegistry;
 import dev.sirius.cloud.protocol.connection.NetworkChannel;
 import dev.sirius.cloud.protocol.connection.PacketHandler;
@@ -19,6 +20,7 @@ import dev.sirius.cloud.protocol.packet.ConnectionType;
 import dev.sirius.cloud.protocol.packet.Packet;
 import dev.sirius.cloud.protocol.packet.impl.AcknowledgePacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleCommandPacket;
+import dev.sirius.cloud.protocol.packet.impl.ConsoleHistoryPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleLinePacket;
 import dev.sirius.cloud.protocol.packet.impl.GroupListRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.GroupListResponsePacket;
@@ -48,19 +50,22 @@ public final class NodePacketHandler implements PacketHandler {
     private final GroupRegistry groups;
     private final WrapperRegistry wrappers;
     private final EventManager events;
+    private final NodeConsole console;
 
     public NodePacketHandler(NodeConfig config,
                              ServiceManager serviceManager,
                              ServiceRegistry services,
                              GroupRegistry groups,
                              WrapperRegistry wrappers,
-                             EventManager events) {
+                             EventManager events,
+                             NodeConsole console) {
         this.config = config;
         this.serviceManager = serviceManager;
         this.services = services;
         this.groups = groups;
         this.wrappers = wrappers;
         this.events = events;
+        this.console = console;
     }
 
     @Override
@@ -94,7 +99,11 @@ public final class NodePacketHandler implements PacketHandler {
             });
 
         } else if (packet instanceof ConsoleLinePacket line) {
-            CloudLogger.raw("[" + line.serviceName() + "] " + line.line());
+            // Only reaches a console that asked for it; see AttachCommand.
+            console.printServiceLine(line.serviceId(), line.line());
+
+        } else if (packet instanceof ConsoleHistoryPacket history) {
+            console.printServiceBacklog(history.serviceId(), history.lines());
 
         } else if (packet instanceof ServiceListRequestPacket request) {
             List<ServiceInfo> result = request.groupFilter() == null

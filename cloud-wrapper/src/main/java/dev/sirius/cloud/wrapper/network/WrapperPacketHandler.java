@@ -9,6 +9,7 @@ import dev.sirius.cloud.protocol.connection.PacketHandler;
 import dev.sirius.cloud.protocol.packet.ConnectionType;
 import dev.sirius.cloud.protocol.packet.Packet;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleCommandPacket;
+import dev.sirius.cloud.protocol.packet.impl.ConsoleSubscribePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
@@ -72,6 +73,9 @@ public final class WrapperPacketHandler implements PacketHandler {
 
         } else if (packet instanceof ConsoleCommandPacket command) {
             processes.sendCommand(command.serviceId(), command.command());
+
+        } else if (packet instanceof ConsoleSubscribePacket subscribe) {
+            processes.setConsoleSubscribed(subscribe.serviceId(), subscribe.subscribe());
 
         } else if (packet instanceof HeartbeatPacket) {
             // The node's echo. Receiving it is the point; nothing to do.

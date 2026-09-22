@@ -34,6 +34,7 @@ public final class ServiceProcessManager {
     private final TemplateManager templates;
 
     private final Consumer<ConsoleLine> consoleSink;
+    private final Consumer<ConsoleBacklog> backlogSink;
     private final BiConsumer<UUID, StateChange> stateSink;
 
     private final Map<UUID, ServiceProcess> processes = new ConcurrentHashMap<>();
@@ -43,6 +44,7 @@ public final class ServiceProcessManager {
                                  JarResolver jars,
                                  TemplateManager templates,
                                  Consumer<ConsoleLine> consoleSink,
+                                 Consumer<ConsoleBacklog> backlogSink,
                                  BiConsumer<UUID, StateChange> stateSink) {
         this.config = config;
         this.runningDirectory = workingDirectory.resolve("local").resolve("running");
@@ -51,6 +53,7 @@ public final class ServiceProcessManager {
         this.jars = jars;
         this.templates = templates;
         this.consoleSink = consoleSink;
+        this.backlogSink = backlogSink;
         this.stateSink = stateSink;
     }
 
@@ -114,6 +117,28 @@ public final class ServiceProcessManager {
         }
     }
 
+    /**
+     * Starts or stops streaming a service's console to the node.
+     *
+     * <p>On subscribe the backlog is sent first, so an operator attaching to a
+     * server that booted an hour ago sees why it is in the state it is in
+     * rather than waiting for the next log line.
+     */
+    public void setConsoleSubscribed(UUID serviceId, boolean subscribed) {
+        ServiceProcess process = processes.get(serviceId);
+        if (process == null) {
+            LOGGER.debug("Console subscription for unknown service {}", serviceId);
+            return;
+        }
+
+        process.streaming(subscribed);
+
+        if (subscribed) {
+            backlogSink.accept(new ConsoleBacklog(
+                    serviceId, process.info().name(), process.consoleBacklog()));
+        }
+    }
+
     /** Stops everything and waits, for wrapper shutdown. */
     public void stopAll() {
         Collection<ServiceProcess> running = List.copyOf(processes.values());
@@ -160,6 +185,10 @@ public final class ServiceProcessManager {
 
     /** A line of console output from a service. */
     public record ConsoleLine(UUID serviceId, String serviceName, String line) {
+    }
+
+    /** A service's buffered console history, replayed on attach. */
+    public record ConsoleBacklog(UUID serviceId, String serviceName, List<String> lines) {
     }
 
     /** A lifecycle transition observed by the wrapper. */

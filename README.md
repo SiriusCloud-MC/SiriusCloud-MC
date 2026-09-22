@@ -104,9 +104,50 @@ sirius@node> stop Lobby-1
 | `groups` | Configured groups and how many of each are online |
 | `start <group> [count]` | Starts services |
 | `stop <service\|group\|all> [--force]` | Graceful stop; `--force` kills |
-| `exec <service> <command>` | Runs a command inside a service |
+| `exec <service> <command>` | Runs a single command inside a service |
+| `attach <service>` | Opens that service's console (see below) |
+| `versions [--all]` | Paper versions available to groups |
 | `info` | Node status and connected wrappers |
 | `shutdown` | Stops everything, then the node |
+
+---
+
+## Service consoles
+
+**Service output never appears in the node or wrapper console.** With more than
+a couple of servers running, interleaved output from all of them buries the
+node's own logs and is unreadable anyway. So the wrapper keeps a bounded ring
+buffer per service locally and sends *nothing* over the network until somebody
+asks — not "sends it and the node discards it", genuinely nothing.
+
+To open one:
+
+```
+sirius@node> attach Lobby-1
+
+── attached to Lobby-1 ── type #detach (or press Ctrl+C) to return ──
+[12:04:11 INFO]: Starting minecraft server version 1.21.4
+[12:04:19 INFO]: Done (8.102s)! For help, type "help"
+── end of 47 buffered line(s), now live ──
+Lobby-1> say hello everyone
+[12:05:02 INFO]: [Server] hello everyone
+Lobby-1> #detach
+── detached from Lobby-1 ──
+```
+
+While attached the console *is* that server's terminal: every line you type is
+forwarded to it, the prompt shows its name, and the recent backlog is replayed
+first so you see why it is in the state it is in.
+
+- `#detach`, `#exit`, `#quit` or `#back` return to the node. The `#` prefix
+  cannot collide with a Minecraft command.
+- **Ctrl+C detaches** rather than shutting the node down — while attached it
+  reads as "leave this server", and killing the cloud instead would be a nasty
+  surprise. It still shuts down when you are not attached.
+- If the service stops while you are attached, the console detaches itself.
+  That happens over the event bus, not by a special case in the scheduler.
+
+`exec <service> <command>` remains for firing a single command without attaching.
 
 ---
 
@@ -127,6 +168,34 @@ have that directory deleted on stop; static services keep theirs.
 Server jars are downloaded from PaperMC and cached in
 `wrapper/local/jars/cache/`. Dropping a `paper.jar` into `wrapper/local/jars/`
 overrides that, which is also the offline fallback.
+
+---
+
+## Paper versions
+
+Any version PaperMC publishes works. The list is **fetched from their API**, not
+hardcoded, so a new Minecraft release is usable the day it appears with no code
+change. `versions` prints what is on offer; a group's `version` field takes any
+of them or `latest`.
+
+```json
+{ "name": "Lobby", "version": "latest", "build": "latest" }
+{ "name": "Survival", "version": "1.21.4", "build": "196" }
+```
+
+**Nothing in this code parses or compares version strings.** That is the whole
+design of [`PaperVersionCatalog`](cloud-driver/src/main/java/dev/sirius/cloud/driver/paper/PaperVersionCatalog.java):
+Minecraft version strings have not kept one shape over time, and a comparator
+written against the shape they had today would silently mis-order the moment
+that changes — resolving `latest` to the wrong release. So PaperMC's own
+ordering is authoritative: newest last, `latest` is the final entry, "supported"
+means "in the list", and a version range is an *index* into that list rather
+than a numeric comparison. `minimumPaperVersion` in `node/config.json`
+(default `1.21.1`) trims the `versions` listing that way; `versions --all`
+shows everything, and it never blocks a group from pinning an older release.
+
+Groups can also override `javaExecutable`, since a version range spanning
+several Minecraft releases may span their minimum Java versions too.
 
 ---
 
@@ -185,7 +254,7 @@ a service can only ever authenticate as itself, and the token dies with it.
 
 | Milestone | Contents |
 |---|---|
-| **1 — Skeleton** ✅ | Node, wrapper, protocol, Paper plugin, provisioning, console |
+| **1 — Skeleton** ✅ | Node, wrapper, protocol, Paper plugin, provisioning, attach console |
 | **2 — Proxy** | Velocity plugin, dynamic server registration, `/hub`, routing |
 | **3 — Player layer** | Cloud-wide player registry, messaging, transfers, node-side templates |
 | **4 — Modules** | Sign walls, NPCs, REST API, web panel, permissions |

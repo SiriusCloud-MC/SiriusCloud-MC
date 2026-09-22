@@ -13,17 +13,26 @@ import org.jline.utils.AttributedStyle;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.function.Consumer;
+import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 /**
  * The node's interactive console.
  *
- * <p>JLine earns its dependency through one feature: {@code printAbove}. Log
- * lines and piped service output arrive constantly and from other threads, and
- * without it every one of them would land in the middle of whatever the user is
- * typing. Here they scroll past above a prompt that stays put.
+ * <p>JLine earns its dependency through {@code printAbove}: log lines arrive
+ * constantly and from other threads, and without it every one would land in the
+ * middle of whatever is being typed.
+ *
+ * <p>The console has two modes. Normally it dispatches node commands. While
+ * <em>attached</em> to a service it becomes that service's console — output is
+ * streamed in and every line typed is forwarded to the server, exactly as if
+ * you were sitting at its terminal. {@code #detach} (or Ctrl+C) returns.
  */
 public final class NodeConsole implements AutoCloseable {
+
+    /** Escapes recognised while attached. Prefixed so they cannot collide with server commands. */
+    private static final Set<String> DETACH_WORDS = Set.of("#detach", "#exit", "#quit", "#back");
 
     private static final String PROMPT = new AttributedStringBuilder()
             .style(AttributedStyle.DEFAULT.foreground(AttributedStyle.CYAN))
@@ -41,6 +50,7 @@ public final class NodeConsole implements AutoCloseable {
     private final LineReader reader;
 
     private volatile boolean running = true;
+    private volatile ConsoleAttachment attachment;
 
     public NodeConsole(CommandManager commands, Path historyFile) throws IOException {
         this.commands = commands;
@@ -57,9 +67,10 @@ public final class NodeConsole implements AutoCloseable {
         this.reader = LineReaderBuilder.builder()
                 .terminal(terminal)
                 .appName("SiriusCloud")
-                .completer(new CommandCompleter(commands))
+                .completer(new CommandCompleter(commands, this::isAttached))
                 // Without this, a '!' anywhere in a typed command is treated as
-                // a history expansion and mangles the line.
+                // a history expansion and mangles the line. Server commands
+                // contain '!' often enough for that to matter.
                 .option(LineReader.Option.DISABLE_EVENT_EXPANSION, true)
                 .variable(LineReader.HISTORY_FILE, historyFile)
                 .build();
@@ -77,18 +88,92 @@ public final class NodeConsole implements AutoCloseable {
         }
     }
 
-    public Consumer<String> sink() {
-        return this::print;
+    // ---------------------------------------------------------------- attach
+
+    public boolean isAttached() {
+        return attachment != null;
     }
+
+    public UUID attachedService() {
+        ConsoleAttachment current = attachment;
+        return current == null ? null : current.serviceId();
+    }
+
+    /** Switches the console over to a service. Replaces any existing attachment. */
+    public void attach(ConsoleAttachment next) {
+        detach();
+        attachment = next;
+
+        print("");
+        print(banner("── attached to " + next.serviceName()
+                + " ── type #detach (or press Ctrl+C) to return ──"));
+    }
+
+    /** Ends the current attachment, if any. */
+    public void detach() {
+        ConsoleAttachment current = attachment;
+        if (current == null) {
+            return;
+        }
+        attachment = null;
+
+        try {
+            current.onDetach().run();
+        } finally {
+            print(banner("── detached from " + current.serviceName() + " ──"));
+            print("");
+        }
+    }
+
+    /** Detaches only if currently attached to this service. */
+    public void detachIfAttachedTo(UUID serviceId) {
+        ConsoleAttachment current = attachment;
+        if (current != null && current.serviceId().equals(serviceId)) {
+            print(banner("── " + current.serviceName() + " is gone ──"));
+            detach();
+        }
+    }
+
+    /** Prints a line of service output, if it belongs to the attached service. */
+    public void printServiceLine(UUID serviceId, String line) {
+        ConsoleAttachment current = attachment;
+        if (current != null && current.serviceId().equals(serviceId)) {
+            print(line);
+        }
+    }
+
+    /** Replays a service's buffered backlog on attach. */
+    public void printServiceBacklog(UUID serviceId, List<String> lines) {
+        ConsoleAttachment current = attachment;
+        if (current == null || !current.serviceId().equals(serviceId)) {
+            return;
+        }
+        if (lines.isEmpty()) {
+            print(banner("── no console history yet ──"));
+            return;
+        }
+        lines.forEach(this::print);
+        print(banner("── end of " + lines.size() + " buffered line(s), now live ──"));
+    }
+
+    // ------------------------------------------------------------------ loop
 
     /** Blocks the calling thread until the console stops. */
     public void run(Runnable onExit) {
         while (running) {
+            ConsoleAttachment current = attachment;
+
             String line;
             try {
-                line = reader.readLine(PROMPT);
+                line = reader.readLine(current == null ? PROMPT : servicePrompt(current.serviceName()));
             } catch (UserInterruptException exception) {
-                // Ctrl+C
+                // Ctrl+C detaches rather than killing the node — while you are
+                // attached it reads as "leave this server", and shutting the
+                // whole cloud down instead would be a nasty surprise.
+                if (isAttached()) {
+                    detach();
+                    continue;
+                }
                 onExit.run();
                 return;
             } catch (EndOfFileException exception) {
@@ -97,11 +182,45 @@ public final class NodeConsole implements AutoCloseable {
                 return;
             }
 
-            if (line == null || line.isBlank()) {
+            if (line == null) {
                 continue;
             }
-            commands.dispatch(line);
+
+            if (current != null) {
+                handleAttachedInput(current, line);
+                continue;
+            }
+
+            if (!line.isBlank()) {
+                commands.dispatch(line);
+            }
         }
+    }
+
+    private void handleAttachedInput(ConsoleAttachment current, String line) {
+        if (DETACH_WORDS.contains(line.trim().toLowerCase(java.util.Locale.ROOT))) {
+            detach();
+            return;
+        }
+        // A blank line is forwarded as-is: some server prompts expect one.
+        current.input().accept(line);
+    }
+
+    private static String servicePrompt(String serviceName) {
+        return new AttributedStringBuilder()
+                .style(AttributedStyle.DEFAULT.foreground(AttributedStyle.YELLOW))
+                .append(serviceName)
+                .style(AttributedStyle.DEFAULT)
+                .append("> ")
+                .toAnsi();
+    }
+
+    private static String banner(String text) {
+        return new AttributedStringBuilder()
+                .style(AttributedStyle.DEFAULT.foreground(AttributedStyle.BLUE))
+                .append(text)
+                .style(AttributedStyle.DEFAULT)
+                .toAnsi();
     }
 
     public void stop() {
@@ -111,6 +230,7 @@ public final class NodeConsole implements AutoCloseable {
     @Override
     public void close() {
         running = false;
+        attachment = null;
         CloudLogger.sink(System.out::println);
         try {
             terminal.close();

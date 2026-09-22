@@ -14,6 +14,7 @@ import dev.sirius.cloud.node.group.GroupRegistry;
 import dev.sirius.cloud.node.wrapper.ConnectedWrapper;
 import dev.sirius.cloud.node.wrapper.WrapperRegistry;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleCommandPacket;
+import dev.sirius.cloud.protocol.packet.impl.ConsoleSubscribePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStartPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStopPacket;
 
@@ -139,6 +140,18 @@ public final class ServiceManager {
         LOGGER.info("Stopping {}{}", info.name(), force ? " (forced)" : "");
 
         return CompletableFuture.completedFuture(null);
+    }
+
+    /**
+     * Turns console streaming for a service on or off.
+     *
+     * <p>Nothing is streamed until something asks. The wrapper buffers locally,
+     * so the cost of not watching is zero rather than "the node throws it away".
+     */
+    public void subscribeConsole(UUID uniqueId, boolean subscribe) {
+        services.byId(uniqueId).ifPresent(service ->
+                wrappers.byName(service.wrapperName()).ifPresent(wrapper ->
+                        wrapper.send(new ConsoleSubscribePacket(uniqueId, subscribe))));
     }
 
     public void dispatchCommand(UUID uniqueId, String command) {

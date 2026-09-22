@@ -5,8 +5,10 @@ import dev.sirius.cloud.api.logging.CloudLogger;
 import dev.sirius.cloud.api.platform.Platform;
 import dev.sirius.cloud.driver.RemoteCloudDriver;
 import dev.sirius.cloud.driver.config.JsonConfig;
+import dev.sirius.cloud.driver.paper.PaperVersionCatalog;
 import dev.sirius.cloud.protocol.connection.NetworkClient;
 import dev.sirius.cloud.protocol.packet.PacketRegistry;
+import dev.sirius.cloud.protocol.packet.impl.ConsoleHistoryPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleLinePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStateUpdatePacket;
@@ -42,6 +44,7 @@ public final class CloudWrapper {
     private final WrapperConfig config;
 
     private final NetworkClient client = new NetworkClient(PacketRegistry.standard());
+    private final PaperVersionCatalog versions = new PaperVersionCatalog();
     private final ServiceProcessManager processes;
 
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -70,9 +73,11 @@ public final class CloudWrapper {
         this.processes = new ServiceProcessManager(
                 config,
                 workingDirectory,
-                JarResolver.standard(jarDirectory),
+                JarResolver.standard(jarDirectory, versions),
                 new TemplateManager(templatesDirectory),
                 line -> client.send(new ConsoleLinePacket(line.serviceId(), line.serviceName(), line.line())),
+                backlog -> client.send(new ConsoleHistoryPacket(
+                        backlog.serviceId(), backlog.serviceName(), backlog.lines())),
                 (serviceId, change) -> client.send(
                         new ServiceStateUpdatePacket(serviceId, change.state(), change.exitCode())));
     }

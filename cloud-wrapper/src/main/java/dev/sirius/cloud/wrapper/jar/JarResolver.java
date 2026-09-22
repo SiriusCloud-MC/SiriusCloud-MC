@@ -1,6 +1,7 @@
 package dev.sirius.cloud.wrapper.jar;
 
 import dev.sirius.cloud.api.logging.CloudLogger;
+import dev.sirius.cloud.driver.paper.PaperVersionCatalog;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -23,9 +24,9 @@ public final class JarResolver {
         this.providers = providers;
     }
 
-    public static JarResolver standard(Path jarDirectory) {
+    public static JarResolver standard(Path jarDirectory, PaperVersionCatalog catalog) {
         return new JarResolver(List.of(
-                new PaperMcJarProvider(jarDirectory),
+                new PaperMcJarProvider(jarDirectory, catalog),
                 new LocalJarProvider(jarDirectory)));
     }
 

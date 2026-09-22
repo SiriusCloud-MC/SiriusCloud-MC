@@ -18,7 +18,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -46,6 +48,13 @@ public final class ServiceProcess {
     /** How long {@code destroy()} gets before {@code destroyForcibly()}. */
     private static final int TERMINATE_SECONDS = 10;
 
+    /**
+     * Console backlog kept per service so attaching shows recent context
+     * instead of an empty screen. Bounded, because a busy server would
+     * otherwise turn this into a slow memory leak.
+     */
+    private static final int CONSOLE_BACKLOG_LINES = 200;
+
     private final ServiceInfo info;
     private final ServiceGroup group;
     private final WrapperConfig config;
@@ -55,6 +64,12 @@ public final class ServiceProcess {
     private final BiConsumer<ServiceState, Integer> stateSink;
 
     private final AtomicBoolean stopRequested = new AtomicBoolean();
+
+    /** Guarded by itself. */
+    private final Deque<String> consoleBacklog = new ArrayDeque<>(CONSOLE_BACKLOG_LINES);
+
+    /** True only while somebody is attached; see {@link #streaming(boolean)}. */
+    private volatile boolean streaming;
 
     private volatile Process process;
     private volatile BufferedWriter processInput;
@@ -184,9 +199,13 @@ public final class ServiceProcess {
     private void spawn() throws IOException {
         List<String> command = new ArrayList<>();
 
-        // Resolved from java.home, with the .exe suffix on Windows: never
-        // assume the JVM on PATH is the one we want, or that it is named "java".
-        command.add(config.javaExecutable());
+        // A group may pin its own JVM, since the supported Minecraft range
+        // spans releases with different minimum Java versions. Otherwise the
+        // wrapper's default, resolved from java.home with the .exe suffix on
+        // Windows: never assume the JVM on PATH is the one we want.
+        command.add(group.javaExecutable().isBlank()
+                ? config.javaExecutable()
+                : group.javaExecutable());
         command.add("-Xms" + info.memory() + "M");
         command.add("-Xmx" + info.memory() + "M");
         command.addAll(List.of(config.defaultJvmArguments()));
@@ -227,7 +246,7 @@ public final class ServiceProcess {
                 while ((line = reader.readLine()) != null) {
                     // Strip a trailing CR: Windows-side tooling writes CRLF and
                     // readLine only consumes the LF when the stream is raw.
-                    consoleSink.accept(line.endsWith("\r") ? line.substring(0, line.length() - 1) : line);
+                    appendConsole(line.endsWith("\r") ? line.substring(0, line.length() - 1) : line);
                 }
             } catch (IOException exception) {
                 LOGGER.debug("Console pump for {} ended: {}", info.name(), exception.getMessage());
@@ -246,6 +265,43 @@ public final class ServiceProcess {
             stateSink.accept(expected ? ServiceState.STOPPED : ServiceState.CRASHED, exitCode);
             cleanup();
         });
+    }
+
+    /**
+     * Records a console line, and forwards it only if somebody is attached.
+     *
+     * <p>Service output is not pushed to the node by default. Thirty servers
+     * each logging steadily would mean a continuous stream across the network
+     * for the node to immediately throw away, and it would bury the node's own
+     * output. The backlog is kept locally and replayed on attach instead.
+     */
+    private void appendConsole(String line) {
+        synchronized (consoleBacklog) {
+            if (consoleBacklog.size() >= CONSOLE_BACKLOG_LINES) {
+                consoleBacklog.removeFirst();
+            }
+            consoleBacklog.addLast(line);
+        }
+
+        if (streaming) {
+            consoleSink.accept(line);
+        }
+    }
+
+    /** Snapshot of the backlog, oldest first. */
+    public List<String> consoleBacklog() {
+        synchronized (consoleBacklog) {
+            return List.copyOf(consoleBacklog);
+        }
+    }
+
+    /** Turns live forwarding on or off. Set when a console attaches or detaches. */
+    public void streaming(boolean streaming) {
+        this.streaming = streaming;
+    }
+
+    public boolean streaming() {
+        return streaming;
     }
 
     /** Writes a line to the service's stdin. */

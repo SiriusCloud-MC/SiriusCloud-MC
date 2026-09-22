@@ -27,7 +27,22 @@ public final class NodeConfig {
     /** Memory the node is willing to see committed across all services, in MB. */
     private int maxMemory = 4096;
 
+    /**
+     * Oldest Paper version offered by the {@code versions} command.
+     *
+     * <p>Purely a display filter — a group may still pin anything PaperMC
+     * publishes. It exists so the listing shows the range you actually run
+     * instead of a decade of history.
+     */
+    private String minimumPaperVersion = "1.21.1";
+
     private boolean debug = false;
+
+    public String minimumPaperVersion() {
+        return minimumPaperVersion == null || minimumPaperVersion.isBlank()
+                ? "1.21.1"
+                : minimumPaperVersion;
+    }
 
     public String nodeName() {
         return nodeName;

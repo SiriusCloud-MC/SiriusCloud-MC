@@ -2,11 +2,14 @@ package dev.sirius.cloud.node;
 
 import dev.sirius.cloud.api.driver.CloudDriver;
 import dev.sirius.cloud.api.event.EventManager;
+import dev.sirius.cloud.api.event.events.ServiceRemovedEvent;
 import dev.sirius.cloud.api.logging.CloudLogger;
 import dev.sirius.cloud.api.platform.Platform;
 import dev.sirius.cloud.api.service.ServiceInfo;
 import dev.sirius.cloud.driver.event.DefaultEventManager;
+import dev.sirius.cloud.driver.paper.PaperVersionCatalog;
 import dev.sirius.cloud.node.command.CommandManager;
+import dev.sirius.cloud.node.command.commands.AttachCommand;
 import dev.sirius.cloud.node.command.commands.ExecuteCommand;
 import dev.sirius.cloud.node.command.commands.GroupsCommand;
 import dev.sirius.cloud.node.command.commands.HelpCommand;
@@ -15,6 +18,7 @@ import dev.sirius.cloud.node.command.commands.ServicesCommand;
 import dev.sirius.cloud.node.command.commands.ShutdownCommand;
 import dev.sirius.cloud.node.command.commands.StartCommand;
 import dev.sirius.cloud.node.command.commands.StopCommand;
+import dev.sirius.cloud.node.command.commands.VersionsCommand;
 import dev.sirius.cloud.driver.config.JsonConfig;
 import dev.sirius.cloud.node.config.NodeConfig;
 import dev.sirius.cloud.node.console.NodeConsole;
@@ -56,6 +60,7 @@ public final class CloudNode {
     private final ServiceManager serviceManager;
     private final CommandManager commands = new CommandManager();
     private final NetworkServer server = new NetworkServer(PacketRegistry.standard());
+    private final PaperVersionCatalog paperVersions = new PaperVersionCatalog();
 
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "sirius-scheduler");
@@ -96,12 +101,20 @@ public final class CloudNode {
 
         CloudDriver.bind(new LocalCloudDriver(serviceManager, services, groups, events));
 
+        // An attached console must not outlive the service it is attached to.
+        // Doing this through the event bus rather than a call inside
+        // ServiceManager is the point of having the bus: the console is a
+        // consumer of lifecycle events, not something the scheduler knows about.
+        events.subscribe(ServiceRemovedEvent.class,
+                event -> console.detachIfAttachedTo(event.service().uniqueId()));
+
         server.start(config.bindAddress(), config.port(), new NodePacketHandler(
-                config, serviceManager, services, groups, wrappers, events));
+                config, serviceManager, services, groups, wrappers, events, console));
 
         LOGGER.info("Services connect back to {}:{}", config.connectAddress(), config.port());
         LOGGER.info("Wrapper secret: {}", config.secret());
         LOGGER.info("Waiting for a wrapper to connect. Type 'help' for commands.");
+        LOGGER.info("Service consoles are hidden until you 'attach <service>'.");
 
         scheduler.scheduleWithFixedDelay(
                 new ProvisioningTask(groups, services, serviceManager, wrappers),
@@ -154,6 +167,8 @@ public final class CloudNode {
         commands.register(new StartCommand(groups, serviceManager));
         commands.register(new StopCommand(services, serviceManager));
         commands.register(new ExecuteCommand(services, serviceManager));
+        commands.register(new AttachCommand(services, serviceManager, console));
+        commands.register(new VersionsCommand(paperVersions, config.minimumPaperVersion()));
         commands.register(new InfoCommand(config, services, wrappers));
         commands.register(new ShutdownCommand(this));
     }
