@@ -18,6 +18,9 @@ public interface CloudDriver {
 
     GroupProvider groups();
 
+    /** The control plane itself, and the machines attached to it. */
+    NodeProvider node();
+
     EventManager events();
 
     /** {@code NODE}, {@code WRAPPER} or {@code SERVICE} — where this driver runs. */

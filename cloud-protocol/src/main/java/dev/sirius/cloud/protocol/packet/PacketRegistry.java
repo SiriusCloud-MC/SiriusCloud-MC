@@ -10,6 +10,8 @@ import dev.sirius.cloud.protocol.packet.impl.GroupListResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
+import dev.sirius.cloud.protocol.packet.impl.NodeInfoRequestPacket;
+import dev.sirius.cloud.protocol.packet.impl.NodeInfoResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerConnectRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerDisconnectPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerKickPacket;
@@ -28,6 +30,7 @@ import dev.sirius.cloud.protocol.packet.impl.ServiceReadyPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStartPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStartRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStartResponsePacket;
+import dev.sirius.cloud.protocol.packet.impl.ServiceSnapshotPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStateUpdatePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStopPacket;
 
@@ -106,6 +109,7 @@ public final class PacketRegistry {
                 .register(0x23, ConsoleHistoryPacket.class, ConsoleHistoryPacket::new)
                 .register(0x24, ServiceCrashReportPacket.class, ServiceCrashReportPacket::new)
                 .register(0x25, ServicePlayerUpdatePacket.class, ServicePlayerUpdatePacket::new)
+                .register(0x26, ServiceSnapshotPacket.class, ServiceSnapshotPacket::new)
 
                 // 0x30-0x3F — driver queries
                 .register(0x30, ServiceListRequestPacket.class, ServiceListRequestPacket::new)
@@ -114,6 +118,8 @@ public final class PacketRegistry {
                 .register(0x33, ServiceStartResponsePacket.class, ServiceStartResponsePacket::new)
                 .register(0x34, GroupListRequestPacket.class, GroupListRequestPacket::new)
                 .register(0x35, GroupListResponsePacket.class, GroupListResponsePacket::new)
+                .register(0x36, NodeInfoRequestPacket.class, NodeInfoRequestPacket::new)
+                .register(0x37, NodeInfoResponsePacket.class, NodeInfoResponsePacket::new)
 
                 // 0x40-0x4F - players
                 .register(0x40, PlayerLoginPacket.class, PlayerLoginPacket::new)

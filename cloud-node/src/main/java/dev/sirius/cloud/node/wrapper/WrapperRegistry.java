@@ -19,8 +19,24 @@ public final class WrapperRegistry {
         wrappers.put(wrapper.name().toLowerCase(Locale.ROOT), wrapper);
     }
 
-    public Optional<ConnectedWrapper> unregister(String name) {
-        return Optional.ofNullable(wrappers.remove(name.toLowerCase(Locale.ROOT)));
+    /**
+     * Drops a wrapper, but only if the connection that dropped is still the one
+     * registered under that name.
+     *
+     * <p>A wrapper reconnecting replaces its own entry, and the close of the old
+     * channel is not necessarily observed before that happens. Removing by name
+     * alone would then unregister the connection that just arrived, leaving a
+     * wrapper that is connected, authenticated, and invisible to scheduling
+     * until somebody restarts it.
+     */
+    public Optional<ConnectedWrapper> unregister(String name, NetworkChannel channel) {
+        String key = name.toLowerCase(Locale.ROOT);
+        ConnectedWrapper current = wrappers.get(key);
+        if (current == null || current.channel() != channel) {
+            return Optional.empty();
+        }
+        wrappers.remove(key, current);
+        return Optional.of(current);
     }
 
     public Optional<ConnectedWrapper> byName(String name) {
@@ -41,15 +57,25 @@ public final class WrapperRegistry {
         return wrappers.isEmpty();
     }
 
+    /** Whether any connected wrapper has finished announcing what it runs. */
+    public boolean hasReady() {
+        return wrappers.values().stream().anyMatch(ConnectedWrapper::ready);
+    }
+
     /**
      * Picks a wrapper for a service needing {@code requiredMemory} MB.
      *
      * <p>Least-loaded-first. Trivial today with one wrapper, and the single
      * place to change when scheduling needs to consider anything richer.
+     *
+     * <p>Wrappers that have not sent their service snapshot yet are skipped:
+     * until it arrives the node cannot tell an idle machine from one already
+     * running the very service it is about to start.
      */
     public Optional<ConnectedWrapper> selectFor(int requiredMemory) {
         return wrappers.values().stream()
                 .filter(ConnectedWrapper::isAlive)
+                .filter(ConnectedWrapper::ready)
                 .filter(wrapper -> wrapper.info().freeMemory() >= requiredMemory)
                 .min(Comparator.comparingInt(wrapper -> wrapper.info().usedMemory()));
     }

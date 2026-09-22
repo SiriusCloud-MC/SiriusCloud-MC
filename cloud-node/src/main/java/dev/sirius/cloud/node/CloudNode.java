@@ -17,6 +17,7 @@ import dev.sirius.cloud.node.command.commands.ExecuteCommand;
 import dev.sirius.cloud.node.command.commands.GroupsCommand;
 import dev.sirius.cloud.node.command.commands.HelpCommand;
 import dev.sirius.cloud.node.command.commands.InfoCommand;
+import dev.sirius.cloud.node.command.commands.ModulesCommand;
 import dev.sirius.cloud.node.command.commands.PlayerCommand;
 import dev.sirius.cloud.node.command.commands.PlayersCommand;
 import dev.sirius.cloud.node.command.commands.ServicesCommand;
@@ -30,6 +31,7 @@ import dev.sirius.cloud.driver.config.JsonConfig;
 import dev.sirius.cloud.node.config.NodeConfig;
 import dev.sirius.cloud.node.console.NodeConsole;
 import dev.sirius.cloud.node.group.GroupRegistry;
+import dev.sirius.cloud.node.module.ModuleManager;
 import dev.sirius.cloud.node.network.NodePacketHandler;
 import dev.sirius.cloud.node.player.PlayerManager;
 import dev.sirius.cloud.node.player.PlayerRegistry;
@@ -90,6 +92,7 @@ public final class CloudNode {
 
     private NodeConsole console;
     private DirectoryLock directoryLock;
+    private ModuleManager modules;
 
     public CloudNode(Path workingDirectory) throws IOException {
         this.workingDirectory = workingDirectory;
@@ -136,8 +139,11 @@ public final class CloudNode {
             JsonConfig.save(configFile, config);
         }
 
-        CloudDriver.bind(new LocalCloudDriver(
-                serviceManager, services, groups, events, players, playerManager));
+        // Held as well as bound: the packet handler answers node queries through
+        // it, so the API and the console describe the node from one place.
+        LocalCloudDriver driver = new LocalCloudDriver(
+                serviceManager, services, groups, events, players, playerManager, wrappers, config);
+        CloudDriver.bind(driver);
 
         // An attached console must not outlive the service it is attached to.
         // Doing this through the event bus rather than a call inside
@@ -176,12 +182,19 @@ public final class CloudNode {
 
         server.start(config.bindAddress(), config.port(), new NodePacketHandler(
                 config, serviceManager, services, groups, wrappers, events, console,
-                serviceChannels, players));
+                serviceChannels, players, playerManager, driver));
 
         LOGGER.info("Services connect back to {}:{}", config.connectAddress(), config.port());
         LOGGER.info("Wrapper secret: {}", config.secret());
         LOGGER.info("Waiting for a wrapper to connect. Type 'help' for commands.");
         LOGGER.info("Service consoles are hidden until you 'attach <service>'.");
+
+        // After the driver is bound and the listener is up: a module's first
+        // act is typically to query the cloud or open a port of its own, and
+        // neither works before this point.
+        modules = new ModuleManager(workingDirectory.resolve("modules"), driver, events);
+        commands.register(new ModulesCommand(modules));
+        modules.loadAll();
 
         scheduler.scheduleWithFixedDelay(
                 new ProvisioningTask(groups, services, serviceManager, wrappers, backoff),
@@ -200,6 +213,12 @@ public final class CloudNode {
 
         LOGGER.info("Shutting down...");
         scheduler.shutdownNow();
+
+        // Before the services stop: a module watching lifecycle events should
+        // not receive a burst of shutdown traffic it is half torn down for.
+        if (modules != null) {
+            modules.disableAll();
+        }
 
         Collection<ServiceInfo> running = services.all();
         if (!running.isEmpty()) {

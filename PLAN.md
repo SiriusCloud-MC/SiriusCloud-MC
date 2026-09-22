@@ -11,45 +11,47 @@ that is already committed — those come before any new feature.
 
 ## P0 — Defects in shipped code
 
-### 1. Player operations from plugins do nothing
+#1, #2 and #5 are fixed; kept below with what was done, since they describe
+behaviour worth knowing about. #3 and #4 are outstanding.
 
-`RemotePlayerProvider` sends `PlayerConnectRequestPacket` (0x44),
-`PlayerMessagePacket` (0x45) and `PlayerKickPacket` (0x46) to the node, and
-`NodePacketHandler` has no branch for any of them. They are registered in the
-protocol, they serialise fine, and they are silently dropped on arrival.
+### ~~1. Player operations from plugins do nothing~~ — fixed
 
-So `CloudDriver.players().connect(...)`, `.sendMessage(...)`, `.broadcast(...)`
-and `.kick(...)` are inert from a plugin. The node's own `player` and
-`broadcast` commands work, because those go through `LocalCloudDriver` and never
-touch the network — which is exactly why this was not noticed.
+`NodePacketHandler` now handles `PlayerConnectRequestPacket` (0x44),
+`PlayerMessagePacket` (0x45) and `PlayerKickPacket` (0x46), routing them into
+`PlayerManager`, and replies with `AcknowledgePacket`. `RemotePlayerProvider`
+sends them as queries rather than fire-and-forget, so a plugin's future now
+fails with the real reason — "that player is not online", "their proxy is not
+connected" — instead of completing successfully whatever happened.
 
-This breaks the central design rule: the same API is supposed to behave
-identically on either side of the wire.
+A connect target that names a service goes there exactly; anything else is
+treated as a group and balanced, matching what the `player <name> send` command
+has always done.
 
-**Fix:** handle the three packets in `NodePacketHandler`, routing them into
-`PlayerManager`. Reply with `AcknowledgePacket` so the caller's future resolves
-on the real outcome instead of completing optimistically.
-*Where:* `cloud-node/.../network/NodePacketHandler.java`. Small.
+### ~~2. A wrapper reconnect orphans its services~~ — fixed
 
-### 2. A wrapper reconnect orphans its services
+New `ServiceSnapshotPacket` (0x26), wrapper to node, sent immediately after each
+handshake — the same shape as the proxy's `PlayerSnapshotPacket` and for the
+same reason.
 
-When a wrapper disconnects, the node marks every service it owned `CRASHED` and
-drops it from the registry. The wrapper does not stop those processes — and
-deliberately so, since losing the control connection should not disconnect
-players. But nothing re-announces them when the wrapper comes back.
+Two halves:
 
-Result after any node restart or network blip:
+- The node no longer forgets a wrapper's services when it disconnects. They are
+  still running, so releasing their names and ports was the thing that let
+  replacements be provisioned onto occupied ports.
+- On reconnect the snapshot reconciles: services the wrapper no longer reports
+  really did die and are dropped; services the node has never heard of (a node
+  that restarted under a live machine) are adopted, re-reserving their names and
+  ports rather than starting duplicates.
 
-- Minecraft servers keep running, unmanaged and unreachable by any command.
-- The node believes the group is empty and provisions replacements.
-- Released ports get handed to the new services, which then fail to bind.
+For a service the node already knows, the node's own state wins — the wrapper
+can never observe `RUNNING`, since that comes from the in-service plugin.
 
-**Fix:** mirror what the proxy already does for players. The wrapper sends a
-snapshot of its running services right after handshaking; the node adopts them,
-re-reserving their names and ports, rather than starting duplicates. Services
-whose processes really did die are reconciled from the wrapper's own view.
-*Where:* new packet, `CloudWrapper`, `ServiceProcessManager`,
-`NodePacketHandler`. Medium — this is the largest correctness gap.
+A wrapper is not schedulable until its snapshot arrives, which closes the window
+between handshake and snapshot where the machine looks idle. Two latent bugs
+surfaced on the way and are fixed with it: `WrapperRegistry.unregister` removed
+by name alone, so a dead channel's late close could unregister the live
+reconnection; and a snapshot's claimed wrapper name is now ignored in favour of
+the authenticated one, since reconciliation deletes records.
 
 ### 3. A service that never reports ready hangs forever
 
@@ -63,6 +65,23 @@ provisioning tick. On expiry, stop the service and record a failure so the
 backoff applies.
 *Where:* `ProvisioningTask`, `ServiceManager`, `ServiceGroup`. Small.
 
+### ~~4b. Service tokens were single-use, so nothing could ever reconnect~~ — fixed
+
+Found by running the reconnect test rather than by reading: a service's token
+was consumed on first use, so the in-service plugin — which re-reads the same
+`cloud-connection.json` on every reconnect — was refused forever afterwards.
+Any dropped connection locked that service out, and a node restart locked out
+every service in the cloud at once.
+
+Invisible until now because the node used to forget a wrapper's services on
+disconnect, so the rejections looked like noise from processes nobody was
+tracking. With adoption in place they became services stuck in `STARTING`.
+
+**Fixed:** a token is valid for as long as its service is registered, the
+wrapper re-announces it in the service snapshot so a restarted node can re-arm
+it, and a service proving its identity now supersedes the channel already
+registered under its id — which is what single-use was really protecting.
+
 ### 4. Port allocation never checks the port is free
 
 `ServiceRegistry.allocatePort` tracks what the cloud handed out. It has no idea
@@ -73,13 +92,10 @@ occupied port fails to bind and crash-loops until the backoff caps.
 failure if it is taken, so the message names the real cause.
 *Where:* `ServiceProcessManager`. Small.
 
-### 5. The README describes a module loader that does not exist
+### ~~5. The README describes a module loader that does not exist~~ — fixed
 
-> "the event bus and the module loader are the extension points"
-
-The event bus is real. There is no module loader. Either build it (see P2) or
-correct the sentence — but not neither.
-*Where:* `README.md:490`. Trivial either way.
+Resolved the substantive way rather than by editing the sentence: the module
+loader now exists (P2 #10), so the claim is true.
 
 ---
 
@@ -146,26 +162,33 @@ starts, with a content hash so unchanged templates are not resent. A
 `template deploy` command for pushing edits without a restart.
 *Where:* new packets, node template store, wrapper receive side. Medium–large.
 
-### 10. Module system
+### ~~10. Module system~~ — done
 
-The whole of milestone 4 is meant to be modules rather than core changes, and
-there is currently nothing to load them with.
+Built as designed: `node/modules/`, one class loader per module, a
+`module.json` manifest, lifecycle hooks, and `unsubscribeAll(ClassLoader)` on
+disable — the event bus hook that had been sitting unused since the first
+commit. A `modules` console command lists and toggles them.
 
-**Design:** `modules/` directory, one `URLClassLoader` per module, `module.json`
-manifest (id, version, main class, api version), lifecycle hooks, and
-`EventManager.unsubscribeAll(ClassLoader)` on unload — which the event bus
-already supports, unused. Modules get `CloudDriver` and nothing else.
-*Where:* new `cloud-node/.../module/`. Medium.
+The loader is **parent-first**, which is the opposite of most plugin systems and
+deliberate: a module has to see the same `CloudDriver` and event classes the
+node does, or `CloudDriver.instance()` returns something it cannot cast and
+every subscription matches nothing. The cost is that a module cannot bring its
+own version of a library the node already has.
+
+A module that throws is reported and skipped; the node starts regardless.
 
 ---
 
 ## P3 — Features
 
-### Milestone 4 — modules (needs #10 first)
+### Milestone 4 — modules
 
-- **REST API** — service and player state over HTTP, token auth. The thing
-  every panel and bot needs.
-- **Web panel** — read-only first: services, players, consoles. Writes later.
+- ~~**REST API**~~ — done. `cloud-modules/rest`, bearer token, loopback by
+  default. Reaches the cloud only through `CloudDriver`, which is what makes it
+  a real test of the module contract rather than a privileged back door.
+- ~~**Web panel**~~ — done, and with writes rather than read-only first: it
+  turned out the interesting risk was in the control paths, not the tables.
+  Served by the node out of the module jar.
 - **Sign walls** — join signs on a lobby wall, updating live from
   `ServiceStateChangedEvent`.
 - **NPCs** — same idea, player-shaped.
@@ -202,16 +225,16 @@ Small, individually cheap, each removes a "why can't I just…" moment.
 
 ## Suggested order
 
-1. **P0 #1 and #2** — the API is half-inert and a reconnect orphans servers.
-   Both are in shipped code and both bite in normal operation.
-2. **P1 #6** — tests, starting with the two functions that already broke.
+1. ~~**P0 #1 and #2**~~ — done.
+2. **P1 #6** — tests, starting with the two functions that already broke, and
+   now also with the reconnect reconciliation, which has more branches than
+   anything else in here and no way to exercise them by hand.
    Everything after this is safer for it.
-3. **P0 #3, #4, #5** — quick, and each removes a confusing failure.
-4. **P2 #10** — the module system, because milestone 4 is meaningless without
-   it.
+3. **P0 #3 and #4** — quick, and each removes a confusing failure.
+4. ~~**P2 #10**~~ — done, along with the REST API and panel that needed it.
 5. **P2 #9** — node-side templates, the last thing blocking a genuine
    multi-machine deployment.
-6. **P3** — features, in whatever order is most useful to you.
+6. **P3** — the remaining milestone-4 modules: sign walls, NPCs, permissions.
 
 P1 #7 (Windows) can happen whenever a Windows machine is available; it is
 independent of everything else.

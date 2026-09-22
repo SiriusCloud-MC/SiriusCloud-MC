@@ -2,7 +2,6 @@ package dev.sirius.cloud.node.service;
 
 import dev.sirius.cloud.api.service.ServiceId;
 import dev.sirius.cloud.api.service.ServiceInfo;
-import dev.sirius.cloud.api.service.ServiceState;
 
 import java.util.Collection;
 import java.util.HashSet;
@@ -68,6 +67,19 @@ public final class ServiceRegistry {
         return port;
     }
 
+    /**
+     * Marks a specific port as taken, rather than picking one.
+     *
+     * <p>For services that already exist and already hold a port — a wrapper
+     * re-announcing what it is running. Allocating a fresh port for those would
+     * be wrong twice over: it would not match what the process is actually bound
+     * to, and it would leave the real port free for the next service to collide
+     * with.
+     */
+    public synchronized void reservePort(String wrapperName, int port) {
+        portsByWrapper.computeIfAbsent(wrapperName, key -> new HashSet<>()).add(port);
+    }
+
     public synchronized void releasePort(String wrapperName, int port) {
         Set<Integer> used = portsByWrapper.get(wrapperName);
         if (used != null) {
@@ -78,6 +90,20 @@ public final class ServiceRegistry {
     public void add(ServiceInfo service) {
         byId.put(service.uniqueId(), service);
         byName.put(service.serviceId().nameKey(), service.uniqueId());
+    }
+
+    /**
+     * Takes over a service that already exists, reserving what it already holds.
+     *
+     * <p>Unlike {@link #add(ServiceInfo)} this also claims the port, because
+     * nothing allocated it through this registry — the service was started by a
+     * previous node, or by this one before it lost sight of the wrapper. Its
+     * ordinal needs no separate claim: {@link #allocateId(String)} derives what
+     * is taken from the registry contents, so adding it is enough.
+     */
+    public void adopt(ServiceInfo service) {
+        add(service);
+        reservePort(service.wrapperName(), service.port());
     }
 
     public Optional<ServiceInfo> remove(UUID uniqueId) {
@@ -132,14 +158,5 @@ public final class ServiceRegistry {
 
     public int size() {
         return byId.size();
-    }
-
-    /** Marks everything a wrapper was running as crashed after it drops. */
-    public List<ServiceInfo> markWrapperServicesCrashed(String wrapperName) {
-        List<ServiceInfo> affected = ofWrapper(wrapperName).stream()
-                .filter(service -> service.state().isActive())
-                .toList();
-        affected.forEach(service -> service.state(ServiceState.CRASHED));
-        return affected;
     }
 }

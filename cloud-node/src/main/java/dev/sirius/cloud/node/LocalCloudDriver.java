@@ -2,19 +2,27 @@ package dev.sirius.cloud.node;
 
 import dev.sirius.cloud.api.driver.CloudDriver;
 import dev.sirius.cloud.api.driver.GroupProvider;
+import dev.sirius.cloud.api.driver.NodeProvider;
 import dev.sirius.cloud.api.driver.PlayerProvider;
 import dev.sirius.cloud.api.driver.ServiceProvider;
 import dev.sirius.cloud.api.player.CloudPlayer;
 import dev.sirius.cloud.api.event.EventManager;
 import dev.sirius.cloud.api.group.ServiceGroup;
+import dev.sirius.cloud.api.node.NodeInfo;
+import dev.sirius.cloud.api.node.WrapperInfo;
 import dev.sirius.cloud.api.service.ServiceInfo;
 import dev.sirius.cloud.node.group.GroupRegistry;
 import dev.sirius.cloud.node.player.PlayerManager;
 import dev.sirius.cloud.node.player.PlayerRegistry;
 import dev.sirius.cloud.node.service.ServiceManager;
 import dev.sirius.cloud.node.service.ServiceRegistry;
+import dev.sirius.cloud.node.wrapper.ConnectedWrapper;
+import dev.sirius.cloud.node.wrapper.WrapperRegistry;
+import dev.sirius.cloud.node.config.NodeConfig;
+import dev.sirius.cloud.api.platform.Platform;
 
 import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -34,19 +42,43 @@ public final class LocalCloudDriver implements CloudDriver {
     private final EventManager events;
     private final PlayerRegistry playerRegistry;
     private final PlayerManager playerManager;
+    private final WrapperRegistry wrapperRegistry;
+    private final NodeConfig config;
+    private final long startedAt = System.currentTimeMillis();
 
     public LocalCloudDriver(ServiceManager serviceManager,
                             ServiceRegistry serviceRegistry,
                             GroupRegistry groupRegistry,
                             EventManager events,
                             PlayerRegistry playerRegistry,
-                            PlayerManager playerManager) {
+                            PlayerManager playerManager,
+                            WrapperRegistry wrapperRegistry,
+                            NodeConfig config) {
         this.serviceManager = serviceManager;
         this.serviceRegistry = serviceRegistry;
         this.groupRegistry = groupRegistry;
         this.events = events;
         this.playerRegistry = playerRegistry;
         this.playerManager = playerManager;
+        this.wrapperRegistry = wrapperRegistry;
+        this.config = config;
+    }
+
+    /** The node's own description, rebuilt per call so the counters are current. */
+    public NodeInfo describeNode() {
+        NodeInfo info = new NodeInfo(
+                config.nodeName(), Platform.describe(), config.connectAddress(), config.port(), startedAt);
+        info.maxMemory(config.maxMemory());
+        info.committedMemory(serviceRegistry.committedMemory());
+        info.serviceCount(serviceRegistry.size());
+        info.wrapperCount(wrapperRegistry.all().size());
+        info.playerCount(playerRegistry.count());
+        return info;
+    }
+
+    /** Connected machines, as the API sees them. */
+    public Collection<WrapperInfo> describeWrappers() {
+        return wrapperRegistry.all().stream().map(ConnectedWrapper::info).toList();
     }
 
     @Override
@@ -158,6 +190,33 @@ public final class LocalCloudDriver implements CloudDriver {
             @Override
             public Optional<ServiceGroup> cachedGroup(String name) {
                 return groupRegistry.byName(name);
+            }
+        };
+    }
+
+    @Override
+    public NodeProvider node() {
+        return new NodeProvider() {
+            @Override
+            public CompletableFuture<NodeInfo> info() {
+                return CompletableFuture.completedFuture(describeNode());
+            }
+
+            @Override
+            public CompletableFuture<Collection<NodeInfo>> nodes() {
+                // One entry until clustering exists. Shaped as a collection now
+                // so that adding peers later is not an API change.
+                return CompletableFuture.completedFuture(List.of(describeNode()));
+            }
+
+            @Override
+            public CompletableFuture<Collection<WrapperInfo>> wrappers() {
+                return CompletableFuture.completedFuture(describeWrappers());
+            }
+
+            @Override
+            public Optional<WrapperInfo> cachedWrapper(String name) {
+                return wrapperRegistry.byName(name).map(ConnectedWrapper::info);
             }
         };
     }

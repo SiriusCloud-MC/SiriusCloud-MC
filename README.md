@@ -58,11 +58,35 @@ different JDKs.
 | `cloud-wrapper` | Process spawning, templates, jar downloads, console piping. |
 | `cloud-plugins/paper` | In-service bridge. Reports readiness so `RUNNING` means something. |
 | `cloud-plugins/velocity` | Proxy bridge. Registers backends as they appear, routes players. |
+| `cloud-modules/rest` | HTTP API and web panel, loaded as a module rather than built in. |
 
 The design rule everything follows: **all feature code goes through
 `CloudDriver`.** The node binds a local implementation backed by its own
 registries; wrappers and plugins bind a remote one backed by packets. Same
 interface, so a feature is written once and runs on either side.
+
+### Losing the control connection changes nothing
+
+A wrapper that loses the node **does not stop its services**. A network blip
+must not disconnect players, so the processes keep running and the wrapper
+reconnects underneath them.
+
+That leaves the node holding records it cannot act on, which is fine, and it
+must not treat them as gone — releasing their names and ports would have the
+provisioning loop start replacements onto ports that are still bound. So the
+node keeps them, and the wrapper sends a **snapshot of everything it is
+actually running** immediately after each handshake:
+
+- Services the wrapper no longer reports really did die while nobody could see
+  them, and are dropped.
+- Services the node has never heard of are **adopted** — their names and ports
+  re-reserved — rather than duplicated. That is a node that restarted under a
+  machine which kept running, and starting a second `Lobby-1` beside the live
+  one is exactly what this prevents.
+
+A wrapper is not schedulable until that snapshot arrives; until then the node
+cannot tell an idle machine from one already running what it is about to start.
+Same idea as the proxy's player snapshot, one layer down.
 
 ---
 
@@ -425,6 +449,75 @@ several Minecraft releases may span their minimum Java versions too.
 
 ---
 
+## The API and the panel
+
+The node loads anything in `node/modules/` at startup. The REST API ships as one
+of those rather than as part of the node, which is the whole point of the module
+system: it reaches the cloud through `CloudDriver` and nothing else, so it can
+expose nothing a plugin could not already do.
+
+```
+sirius@node> modules
+ID                   VERSION      STATUS     DESCRIPTION
+rest                 1.0.0        enabled    HTTP API and web panel for the cloud
+1 module(s).
+```
+
+On first start it writes `node/modules/rest/config.json` with a generated token
+and prints it once:
+
+```
+[RestApi] API on http://127.0.0.1:8080/api/v1/
+[RestApi] Panel on http://127.0.0.1:8080/
+[RestApi] API token: e9c7afe9-42ca-4114-ad9d-63898fffedcf
+```
+
+**It binds to loopback, and that default is deliberate.** This endpoint starts
+and stops servers, moves players and runs console commands: anything that can
+reach it can run the cloud. Widen `bindAddress` only behind a reverse proxy
+doing TLS — the token travels in a header, and plain HTTP puts it on the wire in
+clear. The node says so loudly if you bind it anywhere else.
+
+The token is separate from the wrapper secret for the same reason the forwarding
+secret is: this one ends up in a browser's local storage and in whatever scripts
+people write, while the cloud secret never leaves a wrapper.
+
+### Endpoints
+
+Every `/api/` call needs `Authorization: Bearer <token>`.
+
+| | |
+|---|---|
+| `GET /api/v1/overview` | everything below in one response — what the panel polls |
+| `GET /api/v1/node`, `/nodes`, `/wrappers` | the control plane and its machines |
+| `GET /api/v1/groups`, `/services`, `/players` | what is configured, running and online |
+| `POST /api/v1/services` | `{"group":"Lobby","count":1}` |
+| `POST /api/v1/services/{name}/stop` | graceful stop |
+| `POST /api/v1/services/{name}/command` | `{"command":"say hello"}` |
+| `POST /api/v1/players/{uuid\|name}/connect` | `{"target":"Lobby"}` — service exactly, or group balanced |
+| `POST /api/v1/players/{uuid\|name}/message` | `{"message":"..."}` |
+| `POST /api/v1/players/{uuid\|name}/kick` | `{"reason":"..."}` |
+| `POST /api/v1/broadcast` | `{"message":"..."}` |
+
+A refusal from the cloud — "no running service of that group", "already at its
+maximum" — comes back as `409` with the reason, not a `500`: it is the caller's
+problem, not a server fault.
+
+### The panel
+
+`http://127.0.0.1:8080/` serves a single self-contained page out of the module
+jar: node and wrapper overview, groups, services and players, with start, stop,
+console command, send, message, kick and broadcast. It asks for the token once
+and keeps it in local storage.
+
+It is **served by the node**, not hosted anywhere. A page hosted elsewhere could
+not reach an API on loopback, and pointing a public site at a control plane
+would mean exposing the control plane. Everything it renders goes in as text
+rather than markup — player names and MOTDs are attacker-controlled, and this
+page can stop servers.
+
+---
+
 ## Cross-platform notes
 
 Both platforms are first-class. The places where that took real care:
@@ -470,9 +563,18 @@ Requests carry a `queryId` and the reply echoes it, which completes a
 request/response layer.
 
 **Authentication:** wrappers and API clients present the node's shared secret.
-Services present a **one-time token**, generated per service and written into
-its working directory as `cloud-connection.json` immediately before spawn — so
-a service can only ever authenticate as itself, and the token dies with it.
+Services present a **per-service token**, generated for each one and written
+into its working directory as `cloud-connection.json` immediately before spawn,
+so a service can only ever authenticate as itself and the token dies with it.
+
+It stays valid for as long as the service is registered rather than being
+consumed on first use. Single-use sounds stronger and is not: a service reads
+the same file on every reconnect, so consuming it meant any dropped connection
+locked that service out permanently — including every service in the cloud when
+the node restarted. What single-use actually guarded against, a second
+connection claiming to be a service that is already here, is handled where it
+belongs: a service proving its identity supersedes the channel already
+registered under its id.
 
 ---
 
@@ -484,9 +586,13 @@ a service can only ever authenticate as itself, and the token dies with it.
 | **2 — Proxy** ✅ | Velocity plugin, dynamic registration, `/hub`, modern forwarding |
 | **3 — Player layer** ✅ | Registry, transfers, messaging, kicks, restart re-sync |
 | **3b — Node-side templates** | Template storage on the node, pushed to wrappers |
-| **4 — Modules** | Sign walls, NPCs, REST API, web panel, permissions |
+| **4 — Modules** | Module loader ✅, REST API ✅, web panel ✅ · sign walls, NPCs, permissions |
 | **5 — Scale** | Node clustering, leader election, state replication |
 
 None of milestones 2–4 need core changes: the event bus and the module loader
 are the extension points, and the protocol was designed multi-node from the
 start so milestone 5 does not require rewriting it.
+
+The REST API is the first module and deliberately so — it uses nothing but
+`CloudDriver`, which makes it a standing check that the module contract is
+enough to build against.

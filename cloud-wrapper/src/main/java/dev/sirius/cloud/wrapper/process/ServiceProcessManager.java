@@ -209,6 +209,23 @@ public final class ServiceProcessManager {
         return processes.size();
     }
 
+    /**
+     * Every service this machine currently has a process for.
+     *
+     * <p>Sent to the node after each handshake so it can adopt them instead of
+     * provisioning duplicates. Losing the node does not stop a service, so the
+     * wrapper is the only thing that still knows these exist.
+     */
+    public List<RunningService> runningServices() {
+        return processes.values().stream()
+                .map(process -> new RunningService(process.info(), process.token()))
+                .toList();
+    }
+
+    /** A live service and the credential its process authenticates with. */
+    public record RunningService(ServiceInfo info, String token) {
+    }
+
     public int committedMemory() {
         return processes.values().stream().mapToInt(process -> process.info().memory()).sum();
     }

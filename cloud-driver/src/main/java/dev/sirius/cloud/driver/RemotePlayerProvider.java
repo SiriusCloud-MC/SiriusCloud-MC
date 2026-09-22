@@ -5,6 +5,7 @@ import dev.sirius.cloud.api.player.CloudPlayer;
 import dev.sirius.cloud.protocol.connection.NetworkChannel;
 import dev.sirius.cloud.protocol.connection.NetworkClient;
 import dev.sirius.cloud.protocol.packet.Packet;
+import dev.sirius.cloud.protocol.packet.impl.AcknowledgePacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerConnectRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerKickPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerListRequestPacket;
@@ -75,29 +76,29 @@ final class RemotePlayerProvider implements PlayerProvider {
 
     @Override
     public CompletableFuture<Void> connect(UUID uniqueId, String serviceName) {
-        return fireAndForget(new PlayerConnectRequestPacket(uniqueId, serviceName));
+        return acknowledged(new PlayerConnectRequestPacket(uniqueId, serviceName));
     }
 
     @Override
     public CompletableFuture<Void> connectToGroup(UUID uniqueId, String groupName) {
         // The node distinguishes a service name from a group name and balances
         // across a group, so the same packet covers both.
-        return fireAndForget(new PlayerConnectRequestPacket(uniqueId, groupName));
+        return acknowledged(new PlayerConnectRequestPacket(uniqueId, groupName));
     }
 
     @Override
     public CompletableFuture<Void> sendMessage(UUID uniqueId, String message) {
-        return fireAndForget(new PlayerMessagePacket(uniqueId, message));
+        return acknowledged(new PlayerMessagePacket(uniqueId, message));
     }
 
     @Override
     public CompletableFuture<Void> broadcast(String message) {
-        return fireAndForget(new PlayerMessagePacket(null, message));
+        return acknowledged(new PlayerMessagePacket(null, message));
     }
 
     @Override
     public CompletableFuture<Void> kick(UUID uniqueId, String reason) {
-        return fireAndForget(new PlayerKickPacket(uniqueId, reason));
+        return acknowledged(new PlayerKickPacket(uniqueId, reason));
     }
 
     void cachePlayer(CloudPlayer player) {
@@ -108,13 +109,24 @@ final class RemotePlayerProvider implements PlayerProvider {
         cache.remove(uniqueId);
     }
 
-    private CompletableFuture<Void> fireAndForget(Packet packet) {
+    /**
+     * Sends an operation and completes when the node says what happened.
+     *
+     * <p>A query rather than a bare send, so that "that player is not online"
+     * or "their proxy is not connected" reaches the caller. Completing as soon
+     * as the bytes left would report success for every request, including the
+     * ones the node cannot carry out.
+     */
+    private CompletableFuture<Void> acknowledged(Packet packet) {
         Optional<NetworkChannel> channel = client.channel();
         if (channel.isEmpty()) {
             return CompletableFuture.failedFuture(new IllegalStateException("Not connected to the node"));
         }
-        channel.get().send(packet);
-        return CompletableFuture.completedFuture(null);
+        return channel.get().query(packet).thenAccept(reply -> {
+            if (reply instanceof AcknowledgePacket ack && !ack.success()) {
+                throw new IllegalStateException(ack.message());
+            }
+        });
     }
 
     private CompletableFuture<Packet> query(Packet packet) {

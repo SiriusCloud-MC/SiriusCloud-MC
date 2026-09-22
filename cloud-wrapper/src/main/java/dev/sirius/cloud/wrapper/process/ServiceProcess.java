@@ -82,6 +82,15 @@ public final class ServiceProcess {
     private volatile Process process;
     private volatile BufferedWriter processInput;
 
+    /**
+     * The credential this service authenticates to the node with.
+     *
+     * <p>Kept so it can be re-announced in the snapshot after a reconnect: a
+     * node that restarted has forgotten every token it issued, and without
+     * this the adopted services could never authenticate again.
+     */
+    private volatile String token;
+
     public ServiceProcess(ServiceInfo info,
                           ServiceGroup group,
                           WrapperConfig config,
@@ -108,6 +117,10 @@ public final class ServiceProcess {
         return directory;
     }
 
+    public String token() {
+        return token == null ? "" : token;
+    }
+
     public boolean isAlive() {
         Process current = process;
         return current != null && current.isAlive();
@@ -121,6 +134,8 @@ public final class ServiceProcess {
                       String nodeHost,
                       int nodePort,
                       String forwardingSecret) throws IOException {
+
+        this.token = token;
 
         prepareDirectory(templates);
 
@@ -159,9 +174,11 @@ public final class ServiceProcess {
     /**
      * Drops the credentials the in-service plugin needs to dial home.
      *
-     * <p>The token is single-use and bound to this service's id, so the file
-     * being readable inside the service directory grants nothing beyond being
-     * this service.
+     * <p>The token is bound to this service's id, so the file being readable
+     * inside the service directory grants nothing beyond being this service.
+     * It stays valid for as long as the service is registered, because the
+     * process re-reads it on every reconnect — after a blip, or after the node
+     * restarted underneath it.
      */
     private void writeConnectionFile(String token, String nodeHost, int nodePort) throws IOException {
         Map<String, Object> connection = new LinkedHashMap<>();
@@ -211,7 +228,23 @@ public final class ServiceProcess {
 
         LOGGER.info("Spawned {} (pid {}, {}MB, {})",
                 info.name(), process.pid(), info.memory(), javaExecutable);
-        stateSink.accept(ServiceState.STARTING, -1);
+        report(ServiceState.STARTING, -1);
+    }
+
+    /**
+     * Reports a transition to the node, and records it on our own copy of the
+     * service.
+     *
+     * <p>That local copy is what goes into the snapshot sent when the wrapper
+     * reconnects, so it has to reflect reality rather than the {@code PREPARED}
+     * it arrived as. The wrapper can never observe {@code RUNNING} — that comes
+     * from the in-service plugin straight to the node — so the node keeps its
+     * own state for a service it already knows, and only believes ours for one
+     * it has never heard of.
+     */
+    private void report(ServiceState state, int exitCode) {
+        info.state(state);
+        stateSink.accept(state, exitCode);
     }
 
     private void startConsolePump() {
@@ -249,7 +282,7 @@ public final class ServiceProcess {
                 crashSink.accept(exitCode, tailOfConsole());
             }
 
-            stateSink.accept(expected ? ServiceState.STOPPED : ServiceState.CRASHED, exitCode);
+            report(expected ? ServiceState.STOPPED : ServiceState.CRASHED, exitCode);
             cleanup();
         });
     }

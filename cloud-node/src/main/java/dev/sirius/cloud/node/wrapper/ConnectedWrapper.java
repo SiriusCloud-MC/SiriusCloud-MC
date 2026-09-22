@@ -12,6 +12,16 @@ public final class ConnectedWrapper {
 
     private volatile long lastHeartbeat = System.currentTimeMillis();
 
+    /**
+     * Whether this wrapper has told us what it is already running.
+     *
+     * <p>A wrapper is not schedulable until it has. It handshakes before it
+     * sends its service snapshot, and in that gap the node's view of the
+     * machine is empty — so provisioning would happily start a second
+     * {@code Lobby-1} onto the port the first one is still bound to.
+     */
+    private volatile boolean ready;
+
     public ConnectedWrapper(WrapperInfo info, NetworkChannel channel) {
         this.info = info;
         this.channel = channel;
@@ -44,5 +54,13 @@ public final class ConnectedWrapper {
 
     public boolean isAlive() {
         return channel.isOpen();
+    }
+
+    public boolean ready() {
+        return ready;
+    }
+
+    public void ready(boolean ready) {
+        this.ready = ready;
     }
 }

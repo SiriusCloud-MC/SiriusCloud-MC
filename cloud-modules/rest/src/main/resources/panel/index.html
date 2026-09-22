@@ -1,0 +1,540 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SiriusCloud</title>
+<style>
+:root {
+  color-scheme: light dark;
+  --bg: #f4f5f7;
+  --panel: #ffffff;
+  --border: #dfe1e6;
+  --text: #16191d;
+  --muted: #6b7280;
+  --accent: #2563eb;
+  --ok: #15803d;
+  --warn: #b45309;
+  --bad: #b91c1c;
+  --idle: #6b7280;
+  --shadow: 0 1px 2px rgba(0,0,0,.06), 0 1px 3px rgba(0,0,0,.05);
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1115;
+    --panel: #171a21;
+    --border: #272b34;
+    --text: #e6e8ec;
+    --muted: #9aa1ad;
+    --accent: #60a5fa;
+    --ok: #4ade80;
+    --warn: #fbbf24;
+    --bad: #f87171;
+    --idle: #9aa1ad;
+    --shadow: none;
+  }
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 14px/1.5 ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+
+header {
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  padding: 14px 20px; background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; z-index: 10;
+}
+header h1 { font-size: 16px; margin: 0; font-weight: 650; letter-spacing: -.01em; }
+header .node { color: var(--muted); font-size: 13px; }
+header .spacer { flex: 1; }
+
+main { padding: 20px; max-width: 1400px; margin: 0 auto; }
+section { margin-bottom: 24px; }
+h2 { font-size: 13px; text-transform: uppercase; letter-spacing: .06em;
+     color: var(--muted); margin: 0 0 10px; font-weight: 600; }
+
+.cards { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.card { background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+        padding: 14px 16px; box-shadow: var(--shadow); }
+.card .label { color: var(--muted); font-size: 12px; text-transform: uppercase; letter-spacing: .05em; }
+.card .value { font-size: 26px; font-weight: 640; margin-top: 4px; letter-spacing: -.02em; }
+.card .sub { color: var(--muted); font-size: 12px; margin-top: 2px; }
+
+.bar { height: 6px; border-radius: 999px; background: var(--border); margin-top: 10px; overflow: hidden; }
+.bar > div { height: 100%; background: var(--accent); border-radius: 999px; transition: width .4s ease; }
+
+.grid2 { display: grid; gap: 24px; grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+
+.tablewrap { background: var(--panel); border: 1px solid var(--border);
+             border-radius: 10px; overflow-x: auto; box-shadow: var(--shadow); }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th { text-align: left; font-weight: 600; color: var(--muted); font-size: 11px;
+     text-transform: uppercase; letter-spacing: .05em;
+     padding: 10px 14px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+td { padding: 10px 14px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+tr:last-child td { border-bottom: none; }
+.empty { padding: 22px 16px; color: var(--muted); text-align: center; }
+
+.pill { display: inline-block; padding: 2px 9px; border-radius: 999px;
+        font-size: 11px; font-weight: 600; letter-spacing: .02em;
+        border: 1px solid currentColor; }
+.s-RUNNING  { color: var(--ok); }
+.s-STARTING, .s-STOPPING, .s-PREPARED { color: var(--warn); }
+.s-CRASHED  { color: var(--bad); }
+.s-STOPPED  { color: var(--idle); }
+.tag { display: inline-block; padding: 1px 7px; border-radius: 5px; font-size: 11px;
+       background: var(--border); color: var(--muted); margin-left: 6px; }
+
+button {
+  font: inherit; font-size: 12px; padding: 5px 11px; border-radius: 7px;
+  border: 1px solid var(--border); background: var(--panel); color: var(--text);
+  cursor: pointer;
+}
+button:hover { border-color: var(--accent); color: var(--accent); }
+button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+button.primary:hover { filter: brightness(1.08); color: #fff; }
+button.danger:hover { border-color: var(--bad); color: var(--bad); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+.actions { display: flex; gap: 6px; }
+
+input {
+  font: inherit; padding: 8px 11px; border-radius: 7px;
+  border: 1px solid var(--border); background: var(--bg); color: var(--text); width: 100%;
+}
+input:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
+
+#login { max-width: 420px; margin: 12vh auto; padding: 26px;
+         background: var(--panel); border: 1px solid var(--border);
+         border-radius: 12px; box-shadow: var(--shadow); }
+#login h1 { margin: 0 0 6px; font-size: 19px; }
+#login p { color: var(--muted); margin: 0 0 18px; font-size: 13px; }
+#login button { width: 100%; margin-top: 12px; padding: 9px; font-size: 14px; }
+
+.modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.45);
+              display: flex; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
+.modal { background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+         padding: 22px; width: 100%; max-width: 420px; }
+.modal h3 { margin: 0 0 4px; font-size: 16px; }
+.modal p { color: var(--muted); font-size: 13px; margin: 0 0 14px; }
+.modal .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+
+#toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+         background: var(--panel); border: 1px solid var(--border); border-radius: 9px;
+         padding: 10px 16px; box-shadow: 0 4px 16px rgba(0,0,0,.2); font-size: 13px;
+         z-index: 60; max-width: 90vw; }
+#toast.bad { border-color: var(--bad); color: var(--bad); }
+#toast.ok  { border-color: var(--ok); }
+
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%;
+       background: var(--ok); margin-right: 7px; vertical-align: middle; }
+.dot.stale { background: var(--bad); }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+
+<div id="login" hidden>
+  <h1>SiriusCloud</h1>
+  <p>Paste the API token. The node prints it at startup, and it is stored in
+     <span class="mono">modules/rest/config.json</span>.</p>
+  <input id="token" type="password" placeholder="API token" autocomplete="off" spellcheck="false">
+  <button class="primary" id="signin">Connect</button>
+</div>
+
+<div id="app" hidden>
+  <header>
+    <h1>SiriusCloud</h1>
+    <span class="node" id="nodeline">—</span>
+    <span class="spacer"></span>
+    <span class="node"><span class="dot" id="dot"></span><span id="status">connecting</span></span>
+    <button id="signout">Sign out</button>
+  </header>
+
+  <main>
+    <section>
+      <div class="cards">
+        <div class="card">
+          <div class="label">Services</div>
+          <div class="value" id="c-services">0</div>
+          <div class="sub" id="c-services-sub">none running</div>
+        </div>
+        <div class="card">
+          <div class="label">Players</div>
+          <div class="value" id="c-players">0</div>
+          <div class="sub" id="c-players-sub">across every proxy</div>
+        </div>
+        <div class="card">
+          <div class="label">Wrappers</div>
+          <div class="value" id="c-wrappers">0</div>
+          <div class="sub" id="c-wrappers-sub">machines connected</div>
+        </div>
+        <div class="card">
+          <div class="label">Memory</div>
+          <div class="value" id="c-memory">0</div>
+          <div class="sub" id="c-memory-sub">committed</div>
+          <div class="bar"><div id="c-memory-bar" style="width:0%"></div></div>
+        </div>
+      </div>
+    </section>
+
+    <div class="grid2">
+      <section>
+        <h2>Nodes</h2>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Name</th><th>Address</th><th>Memory</th><th>Uptime</th></tr></thead>
+          <tbody id="t-nodes"></tbody>
+        </table></div>
+      </section>
+
+      <section>
+        <h2>Wrappers</h2>
+        <div class="tablewrap"><table>
+          <thead><tr><th>Name</th><th>Host</th><th>Memory</th><th>Platform</th></tr></thead>
+          <tbody id="t-wrappers"></tbody>
+        </table></div>
+      </section>
+    </div>
+
+    <section>
+      <h2>Groups</h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Name</th><th>Type</th><th>Online</th><th>Memory</th><th>Version</th><th>Port</th><th></th></tr></thead>
+        <tbody id="t-groups"></tbody>
+      </table></div>
+    </section>
+
+    <section>
+      <h2>Services</h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Name</th><th>State</th><th>Address</th><th>Players</th><th>Uptime</th><th>Wrapper</th><th></th></tr></thead>
+        <tbody id="t-services"></tbody>
+      </table></div>
+    </section>
+
+    <section>
+      <h2>Players
+        <button id="broadcast" style="margin-left:10px;text-transform:none;letter-spacing:0">Broadcast</button>
+      </h2>
+      <div class="tablewrap"><table>
+        <thead><tr><th>Name</th><th>Server</th><th>Proxy</th><th>Online</th><th>Address</th><th></th></tr></thead>
+        <tbody id="t-players"></tbody>
+      </table></div>
+    </section>
+  </main>
+</div>
+
+<script>
+(function () {
+  "use strict";
+
+  var KEY = "siriuscloud.token";
+  var token = null;
+  var timer = null;
+  var busy = false;
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  // Every value from the API is rendered as a text node, never as markup:
+  // player names and MOTDs are attacker-controlled and this panel can stop
+  // servers.
+  function cell(row, text, className) {
+    var td = document.createElement("td");
+    if (className) { td.className = className; }
+    td.textContent = text === null || text === undefined ? "—" : String(text);
+    row.appendChild(td);
+    return td;
+  }
+
+  function duration(ms) {
+    var s = Math.floor((ms || 0) / 1000);
+    if (s < 60) { return s + "s"; }
+    if (s < 3600) { return Math.floor(s / 60) + "m" + (s % 60) + "s"; }
+    if (s < 86400) { return Math.floor(s / 3600) + "h" + Math.floor((s % 3600) / 60) + "m"; }
+    return Math.floor(s / 86400) + "d" + Math.floor((s % 86400) / 3600) + "h";
+  }
+
+  function toast(message, kind) {
+    var existing = $("toast");
+    if (existing) { existing.remove(); }
+    var el = document.createElement("div");
+    el.id = "toast";
+    el.className = kind || "";
+    el.textContent = message;
+    document.body.appendChild(el);
+    setTimeout(function () { if (el.parentNode) { el.remove(); } }, 4000);
+  }
+
+  // ------------------------------------------------------------------ api
+
+  function api(path, method, body) {
+    return fetch("/api/v1/" + path, {
+      method: method || "GET",
+      headers: {
+        "Authorization": "Bearer " + token,
+        "Content-Type": "application/json"
+      },
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (response) {
+      if (response.status === 401) {
+        signOut();
+        throw new Error("The token was rejected");
+      }
+      return response.json().catch(function () { return {}; }).then(function (data) {
+        if (!response.ok) { throw new Error(data.error || ("HTTP " + response.status)); }
+        return data;
+      });
+    });
+  }
+
+  function act(path, body, success) {
+    if (busy) { return; }
+    busy = true;
+    api(path, "POST", body).then(function (data) {
+      toast(success || data.message || "Done", "ok");
+      refresh();
+    }).catch(function (error) {
+      toast(error.message, "bad");
+    }).then(function () { busy = false; });
+  }
+
+  // ---------------------------------------------------------------- modal
+
+  function ask(title, note, placeholder, onConfirm) {
+    var back = document.createElement("div");
+    back.className = "modal-back";
+    back.innerHTML =
+      '<div class="modal"><h3></h3><p></p>' +
+      '<input type="text" spellcheck="false" autocomplete="off">' +
+      '<div class="row"><button data-x>Cancel</button>' +
+      '<button class="primary" data-ok>Confirm</button></div></div>';
+    back.querySelector("h3").textContent = title;
+    back.querySelector("p").textContent = note;
+    var input = back.querySelector("input");
+    input.placeholder = placeholder || "";
+
+    function close() { back.remove(); }
+    function confirm() {
+      var value = input.value.trim();
+      close();
+      onConfirm(value);
+    }
+    back.querySelector("[data-x]").onclick = close;
+    back.querySelector("[data-ok]").onclick = confirm;
+    back.onclick = function (event) { if (event.target === back) { close(); } };
+    input.onkeydown = function (event) {
+      if (event.key === "Enter") { confirm(); }
+      if (event.key === "Escape") { close(); }
+    };
+
+    document.body.appendChild(back);
+    input.focus();
+  }
+
+  function button(label, className, onClick) {
+    var b = document.createElement("button");
+    b.textContent = label;
+    if (className) { b.className = className; }
+    b.onclick = onClick;
+    return b;
+  }
+
+  // --------------------------------------------------------------- render
+
+  function render(data) {
+    var node = data.node || {};
+    $("nodeline").textContent = node.name
+      ? node.name + " · " + node.connectAddress + ":" + node.port + " · up " + duration(node.uptimeMillis)
+      : "";
+
+    var services = data.services || [];
+    var running = services.filter(function (s) { return s.state === "RUNNING"; }).length;
+    $("c-services").textContent = services.length;
+    $("c-services-sub").textContent = running + " running";
+    $("c-players").textContent = (data.players || []).length;
+    $("c-wrappers").textContent = (data.wrappers || []).length;
+
+    var used = node.committedMemory || 0;
+    var max = node.maxMemory || 0;
+    $("c-memory").textContent = used + " MB";
+    $("c-memory-sub").textContent = "of " + max + " MB committed";
+    $("c-memory-bar").style.width = (max > 0 ? Math.min(100, (used / max) * 100) : 0) + "%";
+
+    fill("t-nodes", data.nodes, 4, function (n, row) {
+      cell(row, n.name);
+      cell(row, n.connectAddress + ":" + n.port, "mono");
+      cell(row, n.committedMemory + " / " + n.maxMemory + " MB");
+      cell(row, duration(n.uptimeMillis));
+    });
+
+    fill("t-wrappers", data.wrappers, 4, function (w, row) {
+      cell(row, w.name);
+      cell(row, w.host, "mono");
+      cell(row, w.usedMemory + " / " + w.maxMemory + " MB");
+      cell(row, w.platform);
+    });
+
+    fill("t-groups", data.groups, 7, function (g, row) {
+      var name = cell(row, g.name);
+      if (g.maintenance) {
+        var tag = document.createElement("span");
+        tag.className = "tag";
+        tag.textContent = "maintenance";
+        name.appendChild(tag);
+      }
+      cell(row, g.type);
+      cell(row, g.online + " / " + g.minServices + "–" + g.maxServices);
+      cell(row, g.memory + " MB");
+      cell(row, g.version);
+      cell(row, g.startPort + "+", "mono");
+      var td = document.createElement("td");
+      td.appendChild(button("Start", "primary", function () {
+        act("services", { group: g.name, count: 1 }, "Starting a " + g.name);
+      }));
+      row.appendChild(td);
+    });
+
+    fill("t-services", services, 7, function (s, row) {
+      cell(row, s.name);
+      var state = cell(row, "");
+      var pill = document.createElement("span");
+      pill.className = "pill s-" + s.state;
+      pill.textContent = s.state;
+      state.appendChild(pill);
+      cell(row, s.host + ":" + s.port, "mono");
+      cell(row, s.players + " / " + s.maxPlayers);
+      cell(row, duration(s.uptimeMillis));
+      cell(row, s.wrapper);
+
+      var td = document.createElement("td");
+      var actions = document.createElement("div");
+      actions.className = "actions";
+      actions.appendChild(button("Command", "", function () {
+        ask("Run in " + s.name, "Sent to the service console.", "say hello", function (value) {
+          if (value) { act("services/" + encodeURIComponent(s.name) + "/command", { command: value }); }
+        });
+      }));
+      actions.appendChild(button("Stop", "danger", function () {
+        ask("Stop " + s.name + "?", "Type the name to confirm a graceful stop.", s.name, function (value) {
+          if (value === s.name) {
+            act("services/" + encodeURIComponent(s.name) + "/stop", {});
+          } else if (value) {
+            toast("Name did not match; nothing stopped", "bad");
+          }
+        });
+      }));
+      td.appendChild(actions);
+      row.appendChild(td);
+    });
+
+    fill("t-players", data.players, 6, function (p, row) {
+      cell(row, p.name);
+      cell(row, p.server);
+      cell(row, p.proxy);
+      cell(row, duration(p.onlineMillis));
+      cell(row, p.address, "mono");
+
+      var td = document.createElement("td");
+      var actions = document.createElement("div");
+      actions.className = "actions";
+      actions.appendChild(button("Send", "", function () {
+        ask("Send " + p.name, "A service name goes there exactly; a group is balanced.",
+          "Lobby", function (value) {
+            if (value) { act("players/" + p.id + "/connect", { target: value }); }
+          });
+      }));
+      actions.appendChild(button("Message", "", function () {
+        ask("Message " + p.name, "Shown to them in chat.", "Welcome back", function (value) {
+          if (value) { act("players/" + p.id + "/message", { message: value }); }
+        });
+      }));
+      actions.appendChild(button("Kick", "danger", function () {
+        ask("Kick " + p.name, "They are shown this reason.", "Disconnected by an administrator",
+          function (value) {
+            act("players/" + p.id + "/kick", { reason: value });
+          });
+      }));
+      td.appendChild(actions);
+      row.appendChild(td);
+    });
+  }
+
+  function fill(id, rows, columns, build) {
+    var body = $(id);
+    body.textContent = "";
+    if (!rows || rows.length === 0) {
+      var tr = document.createElement("tr");
+      var td = document.createElement("td");
+      td.colSpan = columns;
+      td.className = "empty";
+      td.textContent = "Nothing here yet.";
+      tr.appendChild(td);
+      body.appendChild(tr);
+      return;
+    }
+    rows.forEach(function (item) {
+      var tr = document.createElement("tr");
+      build(item, tr);
+      body.appendChild(tr);
+    });
+  }
+
+  // ---------------------------------------------------------------- cycle
+
+  function refresh() {
+    return api("overview").then(function (data) {
+      render(data);
+      $("status").textContent = "live";
+      $("dot").className = "dot";
+    }).catch(function (error) {
+      $("status").textContent = error.message;
+      $("dot").className = "dot stale";
+    });
+  }
+
+  function signIn(value) {
+    token = value;
+    try { localStorage.setItem(KEY, value); } catch (e) { /* private mode */ }
+    $("login").hidden = true;
+    $("app").hidden = false;
+    refresh();
+    // Poll rather than stream: the cloud has no push channel to a browser, and
+    // two seconds is well inside how fast any of this actually changes.
+    timer = setInterval(refresh, 2000);
+  }
+
+  function signOut() {
+    token = null;
+    try { localStorage.removeItem(KEY); } catch (e) { /* ignore */ }
+    if (timer) { clearInterval(timer); timer = null; }
+    $("app").hidden = true;
+    $("login").hidden = false;
+    $("token").value = "";
+  }
+
+  $("signin").onclick = function () {
+    var value = $("token").value.trim();
+    if (value) { signIn(value); }
+  };
+  $("token").onkeydown = function (event) {
+    if (event.key === "Enter") { $("signin").click(); }
+  };
+  $("signout").onclick = signOut;
+  $("broadcast").onclick = function () {
+    ask("Broadcast", "Sent to every player on every proxy.", "Server restarting in 5 minutes",
+      function (value) {
+        if (value) { act("broadcast", { message: value }); }
+      });
+  };
+
+  var saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) { /* ignore */ }
+  if (saved) { signIn(saved); } else { $("login").hidden = false; }
+})();
+</script>
+</body>
+</html>

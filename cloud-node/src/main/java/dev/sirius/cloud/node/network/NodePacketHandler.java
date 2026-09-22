@@ -1,6 +1,7 @@
 package dev.sirius.cloud.node.network;
 
 import dev.sirius.cloud.api.event.EventManager;
+import dev.sirius.cloud.api.event.events.ServiceCreatedEvent;
 import dev.sirius.cloud.api.event.events.WrapperConnectedEvent;
 import dev.sirius.cloud.api.event.events.WrapperDisconnectedEvent;
 import dev.sirius.cloud.api.logging.CloudLogger;
@@ -12,8 +13,10 @@ import dev.sirius.cloud.api.event.events.PlayerSwitchServerEvent;
 import dev.sirius.cloud.api.service.ServiceInfo;
 import dev.sirius.cloud.api.service.ServiceState;
 import dev.sirius.cloud.api.service.ServiceType;
+import dev.sirius.cloud.node.LocalCloudDriver;
 import dev.sirius.cloud.node.config.NodeConfig;
 import dev.sirius.cloud.node.group.GroupRegistry;
+import dev.sirius.cloud.node.player.PlayerManager;
 import dev.sirius.cloud.node.player.PlayerRegistry;
 import dev.sirius.cloud.node.service.ServiceChannelRegistry;
 import dev.sirius.cloud.node.service.ServiceManager;
@@ -34,10 +37,15 @@ import dev.sirius.cloud.protocol.packet.impl.GroupListResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
+import dev.sirius.cloud.protocol.packet.impl.NodeInfoRequestPacket;
+import dev.sirius.cloud.protocol.packet.impl.NodeInfoResponsePacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerConnectRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerDisconnectPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerKickPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerListRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerListResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerLoginPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerMessagePacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerSnapshotPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerSwitchServerPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceAvailabilityPacket;
@@ -46,6 +54,7 @@ import dev.sirius.cloud.protocol.packet.impl.ServiceListRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServicePlayerUpdatePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceListResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceReadyPacket;
+import dev.sirius.cloud.protocol.packet.impl.ServiceSnapshotPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStartRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStartResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStateUpdatePacket;
@@ -53,7 +62,10 @@ import dev.sirius.cloud.protocol.packet.impl.ServiceStopPacket;
 
 import java.net.InetSocketAddress;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.UUID;
 
 /** Every inbound packet the node knows how to answer. */
 public final class NodePacketHandler implements PacketHandler {
@@ -69,6 +81,8 @@ public final class NodePacketHandler implements PacketHandler {
     private final NodeConsole console;
     private final ServiceChannelRegistry serviceChannels;
     private final PlayerRegistry players;
+    private final PlayerManager playerManager;
+    private final LocalCloudDriver driver;
 
     public NodePacketHandler(NodeConfig config,
                              ServiceManager serviceManager,
@@ -78,7 +92,9 @@ public final class NodePacketHandler implements PacketHandler {
                              EventManager events,
                              NodeConsole console,
                              ServiceChannelRegistry serviceChannels,
-                             PlayerRegistry players) {
+                             PlayerRegistry players,
+                             PlayerManager playerManager,
+                             LocalCloudDriver driver) {
         this.config = config;
         this.serviceManager = serviceManager;
         this.services = services;
@@ -88,6 +104,8 @@ public final class NodePacketHandler implements PacketHandler {
         this.console = console;
         this.serviceChannels = serviceChannels;
         this.players = players;
+        this.playerManager = playerManager;
+        this.driver = driver;
     }
 
     @Override
@@ -148,6 +166,28 @@ public final class NodePacketHandler implements PacketHandler {
                         snapshot.players().size(), dropped.size());
             }
 
+        } else if (packet instanceof PlayerConnectRequestPacket request) {
+            // The same packet the node sends a proxy, arriving in the other
+            // direction: here it is a plugin asking the node to move somebody.
+            // A name matching a service goes there exactly; anything else is a
+            // group, and the node balances across it — so one packet covers
+            // both connect() and connectToGroup().
+            boolean isService = services.byName(request.serviceName()).isPresent();
+            (isService
+                    ? playerManager.connect(request.playerId(), request.serviceName())
+                    : playerManager.connectToGroup(request.playerId(), request.serviceName()))
+                    .whenComplete((ignored, error) -> acknowledge(channel, request, error));
+
+        } else if (packet instanceof PlayerMessagePacket message) {
+            (message.isBroadcast()
+                    ? playerManager.broadcast(message.message())
+                    : playerManager.sendMessage(message.playerId(), message.message()))
+                    .whenComplete((ignored, error) -> acknowledge(channel, message, error));
+
+        } else if (packet instanceof PlayerKickPacket kick) {
+            playerManager.kick(kick.playerId(), kick.reason())
+                    .whenComplete((ignored, error) -> acknowledge(channel, kick, error));
+
         } else if (packet instanceof PlayerListRequestPacket request) {
             List<CloudPlayer> result = request.serviceFilter() == null
                     ? new ArrayList<>(players.all())
@@ -170,6 +210,13 @@ public final class NodePacketHandler implements PacketHandler {
                             new ServiceAvailabilityPacket(service, true));
                 }
             });
+
+        } else if (packet instanceof ServiceSnapshotPacket snapshot) {
+            if (channel.type() == ConnectionType.WRAPPER) {
+                adoptWrapperServices(channel, snapshot);
+            } else {
+                LOGGER.warn("Ignoring a service snapshot from non-wrapper {}", channel);
+            }
 
         } else if (packet instanceof ConsoleLinePacket line) {
             // Only reaches a console that asked for it; see AttachCommand.
@@ -194,6 +241,12 @@ public final class NodePacketHandler implements PacketHandler {
                     ? new ArrayList<>(services.all())
                     : services.ofGroup(request.groupFilter());
             channel.respond(request, new ServiceListResponsePacket(result));
+
+        } else if (packet instanceof NodeInfoRequestPacket request) {
+            channel.respond(request, new NodeInfoResponsePacket(
+                    driver.describeNode(),
+                    List.of(driver.describeNode()),
+                    new ArrayList<>(driver.describeWrappers())));
 
         } else if (packet instanceof GroupListRequestPacket request) {
             channel.respond(request, new GroupListResponsePacket(new ArrayList<>(groups.all())));
@@ -243,8 +296,25 @@ public final class NodePacketHandler implements PacketHandler {
             }
             case SERVICE -> {
                 accepted = handshake.serviceId() != null
-                        && serviceManager.consumeToken(handshake.serviceId(), handshake.credential());
-                message = accepted ? "welcome" : "invalid or already-used service token";
+                        && serviceManager.verifyToken(handshake.serviceId(), handshake.credential());
+                message = accepted ? "welcome" : "invalid service token";
+
+                // A service proving its identity is the real one, so it
+                // supersedes any channel still registered under that id rather
+                // than being refused. The alternative loses to a race the node
+                // cannot win: a reconnecting service knows its old socket is
+                // dead well before the node observes the close, and refusing it
+                // then would lock out the very service that is trying to
+                // recover.
+                if (accepted) {
+                    serviceChannels.byService(handshake.serviceId()).ifPresent(existing -> {
+                        if (existing != channel) {
+                            LOGGER.debug("{} reconnected; dropping its previous connection",
+                                    handshake.name());
+                            existing.close();
+                        }
+                    });
+                }
             }
             default -> {
                 accepted = false;
@@ -293,16 +363,22 @@ public final class NodePacketHandler implements PacketHandler {
     @Override
     public void onDisconnect(NetworkChannel channel) {
         if (channel.type() == ConnectionType.WRAPPER && channel.name() != null) {
-            wrappers.unregister(channel.name()).ifPresent(wrapper -> {
+            wrappers.unregister(channel.name(), channel).ifPresent(wrapper -> {
                 events.post(new WrapperDisconnectedEvent(wrapper.info()));
                 LOGGER.warn("Wrapper '{}' disconnected", wrapper.name());
 
-                // The wrapper owned those processes. With it gone we cannot know
-                // or control their fate, so they stop being schedulable.
-                List<ServiceInfo> orphaned = services.markWrapperServicesCrashed(wrapper.name());
-                orphaned.forEach(service -> services.remove(service.uniqueId()));
-                if (!orphaned.isEmpty()) {
-                    LOGGER.warn("Released {} service(s) that were running on it", orphaned.size());
+                // Its services are deliberately left in the registry. Losing the
+                // control connection does not stop a single process — the
+                // wrapper keeps them running so a blip cannot disconnect players
+                // — so forgetting them here would release names and ports that
+                // are still very much in use, and the provisioning loop would
+                // then start replacements onto the same ports. They are
+                // reconciled against the wrapper's own snapshot when it returns;
+                // anything that really died is dropped then.
+                List<ServiceInfo> unmanaged = services.ofWrapper(wrapper.name());
+                if (!unmanaged.isEmpty()) {
+                    LOGGER.warn("{} service(s) on it keep running but cannot be controlled "
+                            + "until it reconnects", unmanaged.size());
                 }
             });
         } else if (channel.type() == ConnectionType.SERVICE && channel.serviceId() != null) {
@@ -322,6 +398,90 @@ public final class NodePacketHandler implements PacketHandler {
             services.byId(channel.serviceId()).ifPresent(service ->
                     LOGGER.debug("Plugin connection for {} closed", service.name()));
         }
+    }
+
+    /**
+     * Reconciles the node's view of a wrapper against what it says it is
+     * actually running, and marks it schedulable.
+     *
+     * <p>The snapshot replaces what the node believed about this machine,
+     * exactly as a proxy's player snapshot does, and both directions matter:
+     *
+     * <ul>
+     *   <li>Services the node still holds but the wrapper no longer reports
+     *       really did die while we could not see them, so their names, ports
+     *       and memory are released.
+     *   <li>Services the wrapper reports but the node has never heard of are
+     *       adopted rather than duplicated — this is a node that restarted
+     *       under a machine that kept running. Starting a second {@code Lobby-1}
+     *       beside the live one is exactly the failure this prevents.
+     * </ul>
+     *
+     * <p>For a service the node already knows, its own state wins. The wrapper
+     * can never observe {@code RUNNING} — that comes from the in-service plugin
+     * straight to the node — so believing the wrapper here would demote every
+     * running server back to {@code STARTING}.
+     */
+    private void adoptWrapperServices(NetworkChannel channel, ServiceSnapshotPacket snapshot) {
+        // The name it authenticated under, never the one the packet claims:
+        // this drops service records, and a wrapper must not be able to
+        // reconcile away another machine's services by naming it.
+        String wrapperName = channel.name();
+        if (!wrapperName.equals(snapshot.wrapperName())) {
+            LOGGER.warn("Wrapper '{}' sent a snapshot naming '{}'; using the authenticated name",
+                    wrapperName, snapshot.wrapperName());
+        }
+
+        Set<UUID> reported = new HashSet<>();
+        snapshot.services().forEach(entry -> reported.add(entry.service().uniqueId()));
+
+        List<ServiceInfo> vanished = services.ofWrapper(wrapperName).stream()
+                .filter(service -> !reported.contains(service.uniqueId()))
+                .toList();
+        vanished.forEach(service -> serviceManager.forget(service.uniqueId()));
+
+        List<ServiceInfo> adopted = new ArrayList<>();
+        for (ServiceSnapshotPacket.Entry entry : snapshot.services()) {
+            ServiceInfo service = entry.service();
+
+            // Before the adoption check: a node that kept the record across a
+            // wrapper blip still holds the token, but one that restarted does
+            // not, and only the wrapper can supply it either way.
+            serviceManager.restoreToken(service.uniqueId(), entry.token());
+
+            if (services.byId(service.uniqueId()).isPresent()) {
+                continue;
+            }
+            services.adopt(service);
+            events.post(new ServiceCreatedEvent(service));
+            adopted.add(service);
+        }
+
+        // Only the newly adopted ones are announced. Services the node kept
+        // through the outage were never unregistered from any proxy, and
+        // re-registering one drops and re-adds it underneath its players.
+        adopted.stream()
+                .filter(service -> service.type() == ServiceType.SERVER)
+                .filter(service -> service.state() == ServiceState.RUNNING)
+                .forEach(service -> serviceChannels.broadcastToProxies(
+                        services, new ServiceAvailabilityPacket(service, true)));
+
+        wrappers.byChannel(channel).ifPresent(wrapper -> wrapper.ready(true));
+
+        if (!snapshot.services().isEmpty() || !vanished.isEmpty()) {
+            LOGGER.info("Wrapper '{}' is running {} service(s): {} adopted, {} no longer there",
+                    wrapperName, snapshot.services().size(), adopted.size(), vanished.size());
+        }
+    }
+
+    /** Answers a request that carried a query id, with whatever actually happened. */
+    private static void acknowledge(NetworkChannel channel, Packet request, Throwable error) {
+        if (request.queryId() == null) {
+            return;
+        }
+        channel.respond(request, error == null
+                ? AcknowledgePacket.ok()
+                : AcknowledgePacket.fail(rootMessage(error)));
     }
 
     /** Tells a freshly connected proxy about every server already running. */

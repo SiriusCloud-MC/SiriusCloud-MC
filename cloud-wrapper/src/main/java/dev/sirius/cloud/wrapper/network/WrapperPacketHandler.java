@@ -13,6 +13,7 @@ import dev.sirius.cloud.protocol.packet.impl.ConsoleSubscribePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
+import dev.sirius.cloud.protocol.packet.impl.ServiceSnapshotPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStartPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStopPacket;
 
@@ -55,6 +56,17 @@ public final class WrapperPacketHandler implements PacketHandler {
             if (response.accepted()) {
                 channel.authenticated(true);
                 LOGGER.info("Authenticated with the node");
+
+                // Immediately, and before anything else: services kept running
+                // through the outage, and until this arrives the node believes
+                // their group is empty and will provision replacements onto the
+                // ports they still hold.
+                channel.send(new ServiceSnapshotPacket(config.name(),
+                        processes.runningServices().stream()
+                                .map(running -> new ServiceSnapshotPacket.Entry(
+                                        running.info(), running.token()))
+                                .toList()));
+
                 connectionStateSink.accept(true);
             } else {
                 LOGGER.error("The node rejected this wrapper: {}", response.message());

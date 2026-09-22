@@ -2,6 +2,7 @@ package dev.sirius.cloud.driver;
 
 import dev.sirius.cloud.api.driver.CloudDriver;
 import dev.sirius.cloud.api.driver.GroupProvider;
+import dev.sirius.cloud.api.driver.NodeProvider;
 import dev.sirius.cloud.api.driver.PlayerProvider;
 import dev.sirius.cloud.api.driver.ServiceProvider;
 import dev.sirius.cloud.api.player.CloudPlayer;
@@ -27,6 +28,7 @@ public final class RemoteCloudDriver implements CloudDriver {
     private final RemoteServiceProvider services;
     private final RemoteGroupProvider groups;
     private final RemotePlayerProvider players;
+    private final RemoteNodeProvider node;
     private final EventManager events = new DefaultEventManager();
 
     public RemoteCloudDriver(String environment, NetworkClient client) {
@@ -35,6 +37,7 @@ public final class RemoteCloudDriver implements CloudDriver {
         this.services = new RemoteServiceProvider(client);
         this.groups = new RemoteGroupProvider(client);
         this.players = new RemotePlayerProvider(client);
+        this.node = new RemoteNodeProvider(client);
     }
 
     @Override
@@ -50,6 +53,11 @@ public final class RemoteCloudDriver implements CloudDriver {
     @Override
     public GroupProvider groups() {
         return groups;
+    }
+
+    @Override
+    public NodeProvider node() {
+        return node;
     }
 
     @Override

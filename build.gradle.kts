@@ -45,8 +45,9 @@ val dist by tasks.registering(Copy::class) {
     val wrapperJar = project(":cloud-wrapper").tasks.named("shadowJar")
     val paperPlugin = project(":cloud-plugins:paper").tasks.named("shadowJar")
     val velocityPlugin = project(":cloud-plugins:velocity").tasks.named("shadowJar")
+    val restModule = project(":cloud-modules:rest").tasks.named("jar")
 
-    dependsOn(nodeJar, wrapperJar, paperPlugin, velocityPlugin)
+    dependsOn(nodeJar, wrapperJar, paperPlugin, velocityPlugin, restModule)
 
     into(layout.buildDirectory.dir("dist"))
 
@@ -66,6 +67,13 @@ val dist by tasks.registering(Copy::class) {
     from(velocityPlugin) {
         into("wrapper/plugins")
         rename { "cloud-plugin-velocity.jar" }
+    }
+    // Modules are loaded from here at node startup. Shipped enabled, because a
+    // control plane you cannot see into is not much of a control plane; the
+    // API binds to loopback and needs its token either way.
+    from(restModule) {
+        into("node/modules")
+        rename { "cloud-module-rest.jar" }
     }
     from("scripts") {
         into(".")

@@ -40,12 +40,21 @@ public final class ServiceManager {
     private final EventManager events;
 
     /**
-     * One-time tokens issued to services that have not connected yet.
+     * Each service's credential, valid for as long as the service is registered.
      *
-     * <p>A service can only ever authenticate as itself, and the token is
-     * consumed on first use, so a leaked working directory cannot be replayed.
+     * <p>A token is bound to one service id, so it can only ever authenticate
+     * as that service — which is the property that matters, and the one that
+     * makes a readable {@code cloud-connection.json} harmless.
+     *
+     * <p>It is deliberately <em>not</em> consumed on first use. That was the
+     * original design and it made any reconnection impossible: a service whose
+     * connection dropped for a moment, or whose node restarted, presented the
+     * same token from its working directory and was refused forever. What
+     * single-use was really guarding against — a second connection claiming to
+     * be a service that is already here — is handled where it belongs, by
+     * superseding the existing channel at handshake.
      */
-    private final Map<UUID, String> pendingTokens = new ConcurrentHashMap<>();
+    private final Map<UUID, String> serviceTokens = new ConcurrentHashMap<>();
 
     public ServiceManager(NodeConfig config,
                           GroupRegistry groups,
@@ -84,9 +93,7 @@ public final class ServiceManager {
         Optional<ConnectedWrapper> target = wrappers.selectFor(group.memory());
         if (target.isEmpty()) {
             return CompletableFuture.failedFuture(new IllegalStateException(
-                    wrappers.isEmpty()
-                            ? "No wrapper is connected"
-                            : "No connected wrapper has " + group.memory() + "MB free"));
+                    noWrapperMessage(group.memory())));
         }
 
         ConnectedWrapper wrapper = target.get();
@@ -108,7 +115,7 @@ public final class ServiceManager {
         events.post(new ServiceCreatedEvent(service));
 
         String token = UUID.randomUUID().toString();
-        pendingTokens.put(service.uniqueId(), token);
+        serviceTokens.put(service.uniqueId(), token);
 
         wrapper.send(new ServiceStartPacket(
                 service, group, token, config.connectAddress(), config.port(),
@@ -118,6 +125,17 @@ public final class ServiceManager {
                 service.name(), wrapper.name(), port, group.memory());
 
         return CompletableFuture.completedFuture(service);
+    }
+
+    /** Why nothing could be scheduled, in terms the operator can act on. */
+    private String noWrapperMessage(int requiredMemory) {
+        if (wrappers.isEmpty()) {
+            return "No wrapper is connected";
+        }
+        if (!wrappers.hasReady()) {
+            return "No wrapper has finished registering its running services yet";
+        }
+        return "No connected wrapper has " + requiredMemory + "MB free";
     }
 
     public CompletableFuture<Void> stop(UUID uniqueId, boolean force) {
@@ -134,7 +152,7 @@ public final class ServiceManager {
             // Drop the record rather than leaving a ghost in the registry.
             LOGGER.warn("Wrapper {} for {} is gone, removing the service record",
                     info.wrapperName(), info.name());
-            remove(uniqueId);
+            forget(uniqueId);
             return CompletableFuture.completedFuture(null);
         }
 
@@ -163,14 +181,24 @@ public final class ServiceManager {
                         wrapper.send(new ConsoleCommandPacket(uniqueId, command))));
     }
 
-    /** Consumes a service's one-time handshake token. */
-    public boolean consumeToken(UUID serviceId, String token) {
-        String expected = pendingTokens.get(serviceId);
-        if (expected == null || !expected.equals(token)) {
-            return false;
+    /** Whether this is the credential issued to that service. */
+    public boolean verifyToken(UUID serviceId, String token) {
+        String expected = serviceTokens.get(serviceId);
+        return expected != null && !expected.isBlank() && expected.equals(token);
+    }
+
+    /**
+     * Re-arms the token of a service adopted from a wrapper's snapshot.
+     *
+     * <p>A restarted node has forgotten every token it ever issued, while the
+     * processes it just adopted are still holding theirs. Without this they
+     * would be visible in the registry and permanently unable to authenticate,
+     * which is adoption doing half a job.
+     */
+    public void restoreToken(UUID serviceId, String token) {
+        if (token != null && !token.isBlank()) {
+            serviceTokens.putIfAbsent(serviceId, token);
         }
-        pendingTokens.remove(serviceId);
-        return true;
     }
 
     /** Applies a lifecycle update reported by a wrapper or a service. */
@@ -181,7 +209,7 @@ public final class ServiceManager {
                 if (state == ServiceState.CRASHED) {
                     LOGGER.warn("{} exited unexpectedly with code {}", service.name(), exitCode);
                 }
-                remove(uniqueId);
+                forget(uniqueId);
             }
         });
     }
@@ -196,8 +224,15 @@ public final class ServiceManager {
         LOGGER.debug("{}: {} -> {}", service.name(), previous, state);
     }
 
-    private void remove(UUID uniqueId) {
-        pendingTokens.remove(uniqueId);
+    /**
+     * Drops a service from the registry, releasing its name and port.
+     *
+     * <p>Public because reconciliation needs it too: when a wrapper reconnects
+     * and no longer reports a service the node was holding, that process really
+     * is gone and the record has to go with it.
+     */
+    public void forget(UUID uniqueId) {
+        serviceTokens.remove(uniqueId);
         services.remove(uniqueId).ifPresent(service -> {
             events.post(new ServiceRemovedEvent(service));
             LOGGER.info("{} is gone (port {} released)", service.name(), service.port());
