@@ -4,6 +4,7 @@ import dev.sirius.cloud.api.group.ServiceGroup;
 import dev.sirius.cloud.api.logging.CloudLogger;
 import dev.sirius.cloud.api.service.ServiceInfo;
 import dev.sirius.cloud.api.service.ServiceState;
+import dev.sirius.cloud.api.service.ServiceType;
 import dev.sirius.cloud.wrapper.config.WrapperConfig;
 import dev.sirius.cloud.wrapper.jar.JarResolver;
 import dev.sirius.cloud.wrapper.java.JavaRuntime;
@@ -30,9 +31,11 @@ public final class ServiceProcessManager {
     private final WrapperConfig config;
     private final Path runningDirectory;
     private final Path staticDirectory;
-    private final Path pluginJar;
+    private final Path serverPluginJar;
+    private final Path proxyPluginJar;
 
-    private final JarResolver jars;
+    private final JarResolver serverJars;
+    private final JarResolver proxyJars;
     private final TemplateManager templates;
     private final JavaRuntimeResolver javaRuntimes;
 
@@ -45,7 +48,8 @@ public final class ServiceProcessManager {
 
     public ServiceProcessManager(WrapperConfig config,
                                  Path workingDirectory,
-                                 JarResolver jars,
+                                 JarResolver serverJars,
+                                 JarResolver proxyJars,
                                  TemplateManager templates,
                                  JavaRuntimeResolver javaRuntimes,
                                  Consumer<ConsoleLine> consoleSink,
@@ -55,8 +59,10 @@ public final class ServiceProcessManager {
         this.config = config;
         this.runningDirectory = workingDirectory.resolve("local").resolve("running");
         this.staticDirectory = workingDirectory.resolve("local").resolve("static");
-        this.pluginJar = workingDirectory.resolve("plugins").resolve("cloud-plugin-paper.jar");
-        this.jars = jars;
+        this.serverPluginJar = workingDirectory.resolve("plugins").resolve("cloud-plugin-paper.jar");
+        this.proxyPluginJar = workingDirectory.resolve("plugins").resolve("cloud-plugin-velocity.jar");
+        this.serverJars = serverJars;
+        this.proxyJars = proxyJars;
         this.templates = templates;
         this.javaRuntimes = javaRuntimes;
         this.consoleSink = consoleSink;
@@ -72,7 +78,8 @@ public final class ServiceProcessManager {
      * I/O — an HTTP download, a recursive copy, a process spawn — and it is
      * called from a Netty event loop that must not be held up.
      */
-    public void start(ServiceInfo info, ServiceGroup group, String token, String nodeHost, int nodePort) {
+    public void start(ServiceInfo info, ServiceGroup group, String token,
+                      String nodeHost, int nodePort, String forwardingSecret) {
         Thread.ofVirtual().name("start-" + info.name()).start(() -> {
             try {
                 // Resolved before anything is copied or downloaded: if the
@@ -82,7 +89,8 @@ public final class ServiceProcessManager {
 
                 templates.prepare(group);
 
-                Path serverJar = jars.resolve(group.version(), group.build());
+                boolean proxy = group.type() == ServiceType.PROXY;
+                Path serverJar = (proxy ? proxyJars : serverJars).resolve(group.version(), group.build());
 
                 Path directory = group.staticService()
                         ? staticDirectory.resolve(info.name())
@@ -105,7 +113,8 @@ public final class ServiceProcessManager {
                                 new CrashReport(info.uniqueId(), info.name(), exitCode, lastLines)));
 
                 processes.put(info.uniqueId(), process);
-                process.start(serverJar, pluginJar, templates, token, nodeHost, nodePort);
+                process.start(serverJar, proxy ? proxyPluginJar : serverPluginJar,
+                        templates, token, nodeHost, nodePort, forwardingSecret);
 
             } catch (IOException exception) {
                 LOGGER.error("Could not start {}: {}", info.name(), exception.getMessage());

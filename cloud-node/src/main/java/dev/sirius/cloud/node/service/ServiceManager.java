@@ -102,6 +102,8 @@ public final class ServiceManager {
                 group.memory(),
                 group.maxPlayers());
 
+        service.fallback(group.fallback());
+
         services.add(service);
         events.post(new ServiceCreatedEvent(service));
 
@@ -109,7 +111,8 @@ public final class ServiceManager {
         pendingTokens.put(service.uniqueId(), token);
 
         wrapper.send(new ServiceStartPacket(
-                service, group, token, config.connectAddress(), config.port()));
+                service, group, token, config.connectAddress(), config.port(),
+                config.forwardingSecret()));
 
         LOGGER.info("Starting {} on {} (port {}, {}MB)",
                 service.name(), wrapper.name(), port, group.memory());

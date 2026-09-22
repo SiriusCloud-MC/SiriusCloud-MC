@@ -40,10 +40,10 @@ public final class PaperMcJarProvider implements JarProvider {
 
     private static final CloudLogger LOGGER = CloudLogger.of(PaperMcJarProvider.class);
 
-    private static final String V3_BUILDS = "https://fill.papermc.io/v3/projects/paper/versions/%s/builds";
-    private static final String V2_VERSION = "https://api.papermc.io/v2/projects/paper/versions/%s";
+    private static final String V3_BUILDS = "https://fill.papermc.io/v3/projects/%s/versions/%s/builds";
+    private static final String V2_VERSION = "https://api.papermc.io/v2/projects/%s/versions/%s";
     private static final String V2_DOWNLOAD =
-            "https://api.papermc.io/v2/projects/paper/versions/%s/builds/%d/downloads/%s";
+            "https://api.papermc.io/v2/projects/%s/versions/%s/builds/%d/downloads/%s";
 
     /** PaperMC asks API consumers to identify themselves. */
     private static final String USER_AGENT = "SiriusCloud/1.0 (+https://github.com/sirius/siriuscloud)";
@@ -55,15 +55,17 @@ public final class PaperMcJarProvider implements JarProvider {
 
     private final Path cacheDirectory;
     private final PaperVersionCatalog catalog;
+    private final String project;
 
-    public PaperMcJarProvider(Path jarDirectory, PaperVersionCatalog catalog) {
+    public PaperMcJarProvider(Path jarDirectory, PaperVersionCatalog catalog, String project) {
         this.cacheDirectory = jarDirectory.resolve("cache");
         this.catalog = catalog;
+        this.project = project;
     }
 
     @Override
     public String name() {
-        return "papermc";
+        return "papermc:" + project;
     }
 
     @Override
@@ -98,7 +100,7 @@ public final class PaperMcJarProvider implements JarProvider {
                         exception.getMessage(), cached.get().getFileName());
                 return cached.get();
             }
-            throw new IOException("Could not resolve a Paper build for " + version
+            throw new IOException("Could not resolve a " + project + " build for " + version
                     + " and nothing is cached: " + exception.getMessage(), exception);
         }
 
@@ -107,7 +109,7 @@ public final class PaperMcJarProvider implements JarProvider {
             return target;
         }
 
-        download(ref, target);
+        download(ref, target, version);
         return target;
     }
 
@@ -132,7 +134,7 @@ public final class PaperMcJarProvider implements JarProvider {
      * the API's ordering precisely because they cannot be compared.
      */
     private BuildRef fetchFromV3(String version, Integer requested) throws IOException, InterruptedException {
-        JsonElement body = get(String.format(V3_BUILDS, version));
+        JsonElement body = get(String.format(V3_BUILDS, project, version));
 
         JsonArray builds = body.isJsonArray()
                 ? body.getAsJsonArray()
@@ -189,7 +191,7 @@ public final class PaperMcJarProvider implements JarProvider {
 
     /** Legacy v2 API: build numbers only, download URL assembled by convention. */
     private BuildRef fetchFromV2(String version, Integer requested) throws IOException, InterruptedException {
-        JsonObject body = get(String.format(V2_VERSION, version)).getAsJsonObject();
+        JsonObject body = get(String.format(V2_VERSION, project, version)).getAsJsonObject();
         JsonArray builds = body.getAsJsonArray("builds");
         if (builds == null || builds.isEmpty()) {
             throw new IOException("No builds listed for " + version);
@@ -203,8 +205,8 @@ public final class PaperMcJarProvider implements JarProvider {
                 number = Math.max(number, element.getAsInt());
             }
         }
-        String fileName = "paper-" + version + "-" + number + ".jar";
-        return new BuildRef(number, String.format(V2_DOWNLOAD, version, number, fileName), null);
+        String fileName = project + "-" + version + "-" + number + ".jar";
+        return new BuildRef(number, String.format(V2_DOWNLOAD, project, version, number, fileName), null);
     }
 
     private JsonElement get(String url) throws IOException, InterruptedException {
@@ -222,8 +224,8 @@ public final class PaperMcJarProvider implements JarProvider {
         return JsonParser.parseString(response.body());
     }
 
-    private void download(BuildRef ref, Path target) throws IOException {
-        LOGGER.info("Downloading Paper build {} ...", ref.build);
+    private void download(BuildRef ref, Path target, String version) throws IOException {
+        LOGGER.info("Downloading {} {} build {} ...", project, version, ref.build);
 
         // Download beside the target, then move: an interrupted download must
         // never leave a half-written jar that looks like a valid cache entry.
@@ -269,13 +271,13 @@ public final class PaperMcJarProvider implements JarProvider {
         try (Stream<Path> files = Files.list(cacheDirectory)) {
             return files
                     .filter(Files::isRegularFile)
-                    .filter(path -> path.getFileName().toString().startsWith("paper-" + version + "-"))
+                    .filter(path -> path.getFileName().toString().startsWith(project + "-" + version + "-"))
                     .max(Comparator.comparing(path -> path.getFileName().toString()));
         }
     }
 
-    private static String jarName(String version, int build) {
-        return "paper-" + version + "-" + build + ".jar";
+    private String jarName(String version, int build) {
+        return project + "-" + version + "-" + build + ".jar";
     }
 
     private static int parseBuild(String build) throws IOException {

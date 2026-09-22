@@ -8,6 +8,7 @@ dependencies {
     implementation(project(":cloud-api"))
     implementation(project(":cloud-protocol"))
     implementation(project(":cloud-driver"))
+    implementation(libs.snakeyaml)
 }
 
 application {

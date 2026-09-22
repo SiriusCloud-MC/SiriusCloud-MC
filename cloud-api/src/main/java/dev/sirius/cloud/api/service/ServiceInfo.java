@@ -19,6 +19,9 @@ public final class ServiceInfo {
     private int maxPlayers;
     private long creationTime;
 
+    /** Copied from the group, so a proxy can route without knowing group definitions. */
+    private boolean fallback;
+
     /** Required by the JSON codec. */
     @SuppressWarnings("unused")
     ServiceInfo() {
@@ -96,6 +99,14 @@ public final class ServiceInfo {
 
     public int maxPlayers() {
         return maxPlayers;
+    }
+
+    public boolean fallback() {
+        return fallback;
+    }
+
+    public void fallback(boolean fallback) {
+        this.fallback = fallback;
     }
 
     public void maxPlayers(int maxPlayers) {

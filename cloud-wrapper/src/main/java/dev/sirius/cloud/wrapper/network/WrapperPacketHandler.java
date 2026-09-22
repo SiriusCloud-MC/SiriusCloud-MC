@@ -72,7 +72,8 @@ public final class WrapperPacketHandler implements PacketHandler {
         }
 
         if (packet instanceof ServiceStartPacket start) {
-            processes.start(start.service(), start.group(), start.token(), start.nodeHost(), start.nodePort());
+            processes.start(start.service(), start.group(), start.token(),
+                    start.nodeHost(), start.nodePort(), start.forwardingSecret());
 
         } else if (packet instanceof ServiceStopPacket stop) {
             processes.stop(stop.serviceId(), stop.force());

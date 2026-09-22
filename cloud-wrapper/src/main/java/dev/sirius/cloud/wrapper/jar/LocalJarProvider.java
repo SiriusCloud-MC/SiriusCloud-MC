@@ -21,9 +21,11 @@ public final class LocalJarProvider implements JarProvider {
     private static final CloudLogger LOGGER = CloudLogger.of(LocalJarProvider.class);
 
     private final Path jarDirectory;
+    private final String project;
 
-    public LocalJarProvider(Path jarDirectory) {
+    public LocalJarProvider(Path jarDirectory, String project) {
         this.jarDirectory = jarDirectory;
+        this.project = project;
     }
 
     @Override
@@ -37,10 +39,10 @@ public final class LocalJarProvider implements JarProvider {
 
         // Most specific name first, then progressively looser.
         for (String candidate : new String[]{
-                "paper-" + version + "-" + build + ".jar",
-                "paper-" + version + ".jar",
+                project + "-" + version + "-" + build + ".jar",
+                project + "-" + version + ".jar",
                 "server.jar",
-                "paper.jar"}) {
+                project + ".jar"}) {
             Path path = jarDirectory.resolve(candidate);
             if (Files.isRegularFile(path)) {
                 LOGGER.info("Using local jar {}", path.getFileName());
@@ -56,7 +58,7 @@ public final class LocalJarProvider implements JarProvider {
         }
 
         throw new IOException("No server jar found in " + jarDirectory.toAbsolutePath()
-                + ". Place paper.jar there, or let the wrapper download one.");
+                + ". Place " + project + ".jar there, or let the wrapper download one.");
     }
 
     private Optional<Path> newestJar() throws IOException {

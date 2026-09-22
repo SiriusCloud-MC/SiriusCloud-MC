@@ -20,11 +20,13 @@ public final class VersionsCommand implements Command {
     /** Versions per printed row; the full list is long. */
     private static final int COLUMNS = 6;
 
-    private final PaperVersionCatalog catalog;
+    private final PaperVersionCatalog paper;
+    private final PaperVersionCatalog velocity;
     private final String minimumVersion;
 
-    public VersionsCommand(PaperVersionCatalog catalog, String minimumVersion) {
-        this.catalog = catalog;
+    public VersionsCommand(PaperVersionCatalog paper, PaperVersionCatalog velocity, String minimumVersion) {
+        this.paper = paper;
+        this.velocity = velocity;
         this.minimumVersion = minimumVersion;
     }
 
@@ -34,22 +36,41 @@ public final class VersionsCommand implements Command {
     }
 
     @Override
+    public String usage() {
+        return "versions [paper|velocity] [--all]";
+    }
+
+    @Override
     public String description() {
-        return "Lists the Paper versions available to groups";
+        return "Lists the Paper or Velocity versions available to groups";
     }
 
     @Override
     public void execute(String[] args) {
-        boolean all = args.length > 0 && args[0].equalsIgnoreCase("--all");
+        boolean all = false;
+        PaperVersionCatalog catalog = paper;
+
+        for (String arg : args) {
+            if (arg.equalsIgnoreCase("--all")) {
+                all = true;
+            } else if (arg.equalsIgnoreCase("velocity") || arg.equalsIgnoreCase("proxy")) {
+                catalog = velocity;
+            }
+        }
+
+        // Velocity's own version line is unrelated to Minecraft's, so the
+        // Minecraft-version floor would filter it to nothing.
+        boolean useFloor = !all && catalog == paper;
+        PaperVersionCatalog target = catalog;
 
         // Off the console thread: the first call is an HTTP round trip and the
         // prompt should not freeze while it happens.
         Thread.ofVirtual().name("paper-versions").start(() -> {
             try {
-                List<String> versions = all ? catalog.versions() : catalog.from(minimumVersion);
+                List<String> versions = useFloor ? target.from(minimumVersion) : target.versions();
 
-                CloudLogger.raw("Paper versions available"
-                        + (all ? "" : " (from " + minimumVersion + "; use '--all' for everything)") + ":");
+                CloudLogger.raw(target.project() + " versions available"
+                        + (useFloor ? " (from " + minimumVersion + "; use '--all' for everything)" : "") + ":");
 
                 for (int i = 0; i < versions.size(); i += COLUMNS) {
                     List<String> row = versions.subList(i, Math.min(i + COLUMNS, versions.size()));
@@ -58,8 +79,8 @@ public final class VersionsCommand implements Command {
                     CloudLogger.raw(builder.toString().stripTrailing());
                 }
 
-                String newest = catalog.newestPublished();
-                String stable = catalog.latest();
+                String newest = target.newestPublished();
+                String stable = target.latest();
 
                 CloudLogger.raw(versions.size() + " version(s). Newest published: " + newest
                         + (newest.equals(stable) ? "" : "  (pre-release)"));
@@ -75,6 +96,6 @@ public final class VersionsCommand implements Command {
 
     @Override
     public List<String> complete(String[] args) {
-        return args.length <= 1 ? List.of("--all") : List.of();
+        return args.length <= 1 ? List.of("paper", "velocity", "--all") : List.of("--all");
     }
 }

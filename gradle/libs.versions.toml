@@ -3,6 +3,8 @@ netty = "4.1.115.Final"
 gson = "2.11.0"
 jline = "3.26.3"
 paper = "1.21.4-R0.1-SNAPSHOT"
+velocity = "4.2.0"
+snakeyaml = "2.3"
 shadow = "8.3.5"
 
 [libraries]
@@ -14,6 +16,8 @@ jline-reader = { module = "org.jline:jline-reader", version.ref = "jline" }
 jline-terminal = { module = "org.jline:jline-terminal", version.ref = "jline" }
 jline-terminal-jni = { module = "org.jline:jline-terminal-jni", version.ref = "jline" }
 paper-api = { module = "io.papermc.paper:paper-api", version.ref = "paper" }
+velocity-api = { module = "com.velocitypowered:velocity-api", version.ref = "velocity" }
+snakeyaml = { module = "org.yaml:snakeyaml", version.ref = "snakeyaml" }
 
 [bundles]
 netty = ["netty-handler", "netty-codec", "netty-transport"]

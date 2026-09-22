@@ -59,8 +59,52 @@ public final class FirstRunSetup {
         configureNode(true);
 
         if (groups.isEmpty()) {
-            createGroup(true);
+            ServiceGroup lobby = createGroup(true);
+
+            // A cloud with no proxy is half a thing: players would have to
+            // connect to a backend port directly, which is exactly what the
+            // forwarding setup is designed to stop being possible.
+            if (lobby != null) {
+                console.heading("Proxy");
+                console.print("  A Velocity proxy is the address players actually connect to.");
+                console.print("  It registers your servers as they start, so nothing needs listing by hand.");
+                console.print("");
+
+                if (console.confirm("Create a Velocity proxy group too?", true)) {
+                    String name = console.ask("Group name", "Proxy");
+                    if (name.isBlank() || groups.byName(name).isPresent()) {
+                        LOGGER.warn("Skipping: '{}' is blank or already exists.", name);
+                    } else {
+                        createProxyGroup(name);
+                    }
+                }
+            }
         }
+    }
+
+    /** A proxy group, with the defaults a proxy actually wants. */
+    private void createProxyGroup(String name) throws IOException {
+        // 25565 is where players expect to connect, and a proxy needs far less
+        // heap than a server since it holds no world.
+        int port = console.askInt("Port players connect to", 25565, 1024, 65535);
+        int memory = console.askInt("RAM for the proxy, in MB", 512, 128, 1024 * 1024);
+        int maxPlayers = console.askInt("Max players shown in the server list", 100, 1, 10000);
+
+        ServiceGroup group = new ServiceGroup(name, ServiceType.PROXY);
+        group.memory(memory);
+        group.minMemory(memory);
+        group.minServiceCount(1);
+        group.maxServiceCount(1);
+        group.maxPlayers(maxPlayers);
+        group.startPort(port);
+        group.version("latest");
+
+        groups.create(group);
+
+        console.print("");
+        LOGGER.info("Created proxy group '{}' on port {} ({}MB)", name, port, memory);
+        LOGGER.info("Players connect to this machine on {}. Servers register themselves.", port);
+        console.print("");
     }
 
     // ------------------------------------------------------------------ node
@@ -148,6 +192,11 @@ public final class FirstRunSetup {
             return null;
         }
 
+        if (!firstRun && console.confirm("Is this a Velocity proxy group?", false)) {
+            createProxyGroup(name);
+            return groups.byName(name).orElse(null);
+        }
+
         console.print("");
         int memory = console.askInt("Maximum RAM per server, in MB", 1024, 256, 1024 * 1024);
         int minMemory = console.askInt(
@@ -164,6 +213,12 @@ public final class FirstRunSetup {
         boolean staticService = console.confirm(
                 "Keep each server's files between restarts (static)?", false);
 
+        // Drives proxy routing: which groups may receive a joining player or
+        // one who types /hub. Kept on the group so adding a lobby is one
+        // decision in one place and the proxy needs no group knowledge.
+        boolean fallback = console.confirm(
+                "Send players here when they join, and on /hub (a lobby)?", firstRun);
+
         ServiceGroup group = new ServiceGroup(name, ServiceType.SERVER);
         group.memory(memory);
         group.minMemory(minMemory);
@@ -173,13 +228,14 @@ public final class FirstRunSetup {
         group.version(version);
         group.startPort(startPort);
         group.staticService(staticService);
+        group.fallback(fallback);
 
         groups.create(group);
 
         console.print("");
-        LOGGER.info("Created '{}': {}-{} servers, {}-{}MB each, port {}+, Paper {}{}",
+        LOGGER.info("Created '{}': {}-{} servers, {}-{}MB each, port {}+, Paper {}{}{}",
                 name, online, maximum, minMemory, memory, startPort, version,
-                staticService ? ", static" : "");
+                staticService ? ", static" : "", fallback ? ", lobby" : "");
 
         // Accepting a budget the node cannot honour would be discovered later
         // as a group that refuses to start. Say it while the numbers are up.

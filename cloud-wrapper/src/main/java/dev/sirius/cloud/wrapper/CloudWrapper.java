@@ -51,7 +51,8 @@ public final class CloudWrapper {
     private final WrapperConfig config;
 
     private final NetworkClient client = new NetworkClient(PacketRegistry.standard());
-    private final PaperVersionCatalog versions = new PaperVersionCatalog();
+    private final PaperVersionCatalog paperVersions = new PaperVersionCatalog("paper");
+    private final PaperVersionCatalog velocityVersions = new PaperVersionCatalog("velocity");
     private final JavaRuntimeResolver javaRuntimes = new JavaRuntimeResolver();
     private final ServiceProcessManager processes;
 
@@ -83,7 +84,8 @@ public final class CloudWrapper {
         this.processes = new ServiceProcessManager(
                 config,
                 workingDirectory,
-                JarResolver.standard(jarDirectory, versions),
+                JarResolver.standard(jarDirectory.resolve("paper"), paperVersions, "paper"),
+                JarResolver.standard(jarDirectory.resolve("velocity"), velocityVersions, "velocity"),
                 new TemplateManager(templatesDirectory),
                 javaRuntimes,
                 line -> client.send(new ConsoleLinePacket(line.serviceId(), line.serviceName(), line.line())),
@@ -119,6 +121,17 @@ public final class CloudWrapper {
 
         processes.cleanStaleDirectories();
         reportServiceRuntime();
+
+        if (config.serviceBindAddress().isBlank()) {
+            // Said once per start, because it is a real exposure and the fix
+            // is one config line - but not an error, since an open bind is
+            // correct whenever the proxy runs on another machine.
+            LOGGER.warn("Backend servers listen on all interfaces.");
+            LOGGER.warn("If this machine is reachable from outside, set 'serviceBindAddress' in "
+                    + "config.json to 127.0.0.1 (proxy on this machine) or a private address.");
+        } else {
+            LOGGER.info("Backend servers listen on {} only", config.serviceBindAddress());
+        }
 
         WrapperPacketHandler handler = new WrapperPacketHandler(
                 config, processes, connected -> {

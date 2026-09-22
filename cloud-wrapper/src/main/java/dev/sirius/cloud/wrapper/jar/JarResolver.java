@@ -24,10 +24,10 @@ public final class JarResolver {
         this.providers = providers;
     }
 
-    public static JarResolver standard(Path jarDirectory, PaperVersionCatalog catalog) {
+    public static JarResolver standard(Path jarDirectory, PaperVersionCatalog catalog, String project) {
         return new JarResolver(List.of(
-                new PaperMcJarProvider(jarDirectory, catalog),
-                new LocalJarProvider(jarDirectory)));
+                new PaperMcJarProvider(jarDirectory, catalog, project),
+                new LocalJarProvider(jarDirectory, project)));
     }
 
     public Path resolve(String version, String build) throws IOException {

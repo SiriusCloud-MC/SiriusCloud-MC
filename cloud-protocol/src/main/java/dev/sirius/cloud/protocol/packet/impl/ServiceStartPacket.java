@@ -22,15 +22,35 @@ public final class ServiceStartPacket extends Packet {
     private String nodeHost;
     private int nodePort;
 
+    /**
+     * Shared secret for Velocity modern forwarding.
+     *
+     * <p>Backends run with {@code online-mode=false} so the proxy can
+     * authenticate on their behalf; without this secret anyone who can reach a
+     * backend port directly could connect as any player. The node generates it
+     * once and every service on every machine gets the same value.
+     */
+    private String forwardingSecret;
+
     public ServiceStartPacket() {
     }
 
-    public ServiceStartPacket(ServiceInfo service, ServiceGroup group, String token, String nodeHost, int nodePort) {
+    public ServiceStartPacket(ServiceInfo service,
+                              ServiceGroup group,
+                              String token,
+                              String nodeHost,
+                              int nodePort,
+                              String forwardingSecret) {
         this.service = service;
         this.group = group;
         this.token = token;
         this.nodeHost = nodeHost;
         this.nodePort = nodePort;
+        this.forwardingSecret = forwardingSecret;
+    }
+
+    public String forwardingSecret() {
+        return forwardingSecret;
     }
 
     public ServiceInfo service() {
@@ -59,7 +79,8 @@ public final class ServiceStartPacket extends Packet {
                 .writeObject(group)
                 .writeString(token)
                 .writeString(nodeHost)
-                .writeInt(nodePort);
+                .writeInt(nodePort)
+                .writeString(forwardingSecret == null ? "" : forwardingSecret);
     }
 
     @Override
@@ -69,5 +90,6 @@ public final class ServiceStartPacket extends Packet {
         this.token = buf.readString();
         this.nodeHost = buf.readString();
         this.nodePort = buf.readInt();
+        this.forwardingSecret = buf.readString();
     }
 }

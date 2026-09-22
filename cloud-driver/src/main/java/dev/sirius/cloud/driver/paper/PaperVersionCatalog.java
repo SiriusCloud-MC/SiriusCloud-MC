@@ -13,6 +13,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -38,8 +39,8 @@ public final class PaperVersionCatalog {
 
     private static final CloudLogger LOGGER = CloudLogger.of("PaperVersions");
 
-    private static final String V3_PROJECT = "https://fill.papermc.io/v3/projects/paper";
-    private static final String V2_PROJECT = "https://api.papermc.io/v2/projects/paper";
+    private static final String V3_PROJECT = "https://fill.papermc.io/v3/projects/%s";
+    private static final String V2_PROJECT = "https://api.papermc.io/v2/projects/%s";
 
     private static final String USER_AGENT = "SiriusCloud/1.0 (+https://github.com/sirius/siriuscloud)";
 
@@ -51,8 +52,19 @@ public final class PaperVersionCatalog {
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
 
+    /** PaperMC project id: {@code paper} or {@code velocity}. */
+    private final String project;
+
     private volatile List<String> cached = List.of();
     private volatile long cachedAt;
+
+    public PaperVersionCatalog(String project) {
+        this.project = project;
+    }
+
+    public String project() {
+        return project;
+    }
 
     /** Oldest first, newest last, exactly as PaperMC orders them. */
     public synchronized List<String> versions() throws IOException {
@@ -77,13 +89,13 @@ public final class PaperVersionCatalog {
         }
 
         if (versions.isEmpty()) {
-            throw new IOException("PaperMC returned no versions");
+            throw new IOException("PaperMC returned no versions for " + project);
         }
 
         cached = List.copyOf(versions);
         cachedAt = System.currentTimeMillis();
-        LOGGER.info("PaperMC publishes {} versions ({} .. {})",
-                cached.size(), cached.get(0), cached.get(cached.size() - 1));
+        LOGGER.info("PaperMC publishes {} {} versions ({} .. {})",
+                cached.size(), project, cached.get(0), cached.get(cached.size() - 1));
         return cached;
     }
 
@@ -108,7 +120,7 @@ public final class PaperVersionCatalog {
         // Every published version is a pre-release. Unlikely, but refusing to
         // resolve at all would be worse than using the newest one there is.
         String newest = versions.get(versions.size() - 1);
-        LOGGER.warn("No stable Paper version is published; falling back to {}", newest);
+        LOGGER.warn("No stable {} version is published; falling back to {}", project, newest);
         return newest;
     }
 
@@ -154,7 +166,7 @@ public final class PaperVersionCatalog {
             }
         }
 
-        throw new IOException("PaperMC does not publish '" + version + "'. Newest is "
+        throw new IOException("PaperMC does not publish " + project + " '" + version + "'. Newest is "
                 + versions.get(versions.size() - 1) + "; run 'versions' for the full list.");
     }
 
@@ -192,7 +204,7 @@ public final class PaperVersionCatalog {
      * family, so both shapes are handled and neither is assumed.
      */
     private List<String> fetchFromV3() throws IOException, InterruptedException {
-        JsonElement body = get(V3_PROJECT);
+        JsonElement body = get(String.format(V3_PROJECT, project));
         JsonObject root = body.getAsJsonObject();
 
         JsonElement versionsElement = root.get("versions");
@@ -210,11 +222,20 @@ public final class PaperVersionCatalog {
                 versions.add(readVersionName(element));
             }
         } else {
-            // Grouped by family, e.g. {"1.21": ["1.21.1", ...], "1.20": [...]}.
-            // Families are listed newest first, so reverse to keep the
-            // oldest-first ordering the rest of this class relies on.
+            // Grouped by release family:
+            //   {"26.3": ["26.3", "26.3-rc-3"], "26.2": [...], ...}
+            //
+            // Newest first at BOTH levels - the families descend, and so do
+            // the versions inside each one. Everything downstream assumes
+            // oldest-first, so both levels are reversed. Missing the inner
+            // reversal is subtle rather than obvious: the list still starts
+            // and ends at the right versions, so it looks sorted, while every
+            // family is internally backwards. 'latest' then resolves to the
+            // OLDEST release of the newest family, and the index-based range
+            // in from() silently covers the wrong span.
             JsonObject grouped = versionsElement.getAsJsonObject();
             List<List<String>> families = new ArrayList<>();
+
             for (Map.Entry<String, JsonElement> entry : grouped.entrySet()) {
                 List<String> family = new ArrayList<>();
                 if (entry.getValue().isJsonArray()) {
@@ -222,8 +243,10 @@ public final class PaperVersionCatalog {
                         family.add(readVersionName(element));
                     }
                 }
+                Collections.reverse(family);
                 families.add(family);
             }
+
             for (int i = families.size() - 1; i >= 0; i--) {
                 versions.addAll(families.get(i));
             }
@@ -235,7 +258,7 @@ public final class PaperVersionCatalog {
 
     /** Legacy v2: {@code {"versions": ["1.8.8", ..., "1.21.4"]}}, oldest first. */
     private List<String> fetchFromV2() throws IOException, InterruptedException {
-        JsonObject root = get(V2_PROJECT).getAsJsonObject();
+        JsonObject root = get(String.format(V2_PROJECT, project)).getAsJsonObject();
         JsonArray array = root.getAsJsonArray("versions");
         if (array == null) {
             throw new IOException("No 'versions' field in the v2 project response");

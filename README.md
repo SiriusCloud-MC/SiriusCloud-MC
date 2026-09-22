@@ -57,6 +57,7 @@ different JDKs.
 | `cloud-node` | State, scheduling, provisioning loop, JLine console. |
 | `cloud-wrapper` | Process spawning, templates, jar downloads, console piping. |
 | `cloud-plugins/paper` | In-service bridge. Reports readiness so `RUNNING` means something. |
+| `cloud-plugins/velocity` | Proxy bridge. Registers backends as they appear, routes players. |
 
 The design rule everything follows: **all feature code goes through
 `CloudDriver`.** The node binds a local implementation backed by its own
@@ -70,6 +71,10 @@ interface, so a feature is written once and runs on either side.
 ```bash
 ./gradlew dist
 ```
+
+The build needs a **Java 25 JDK available to Gradle** as well as Java 21:
+Velocity 4's API is compiled for 25, so the proxy plugin is built against it.
+Gradle finds the toolchain itself. You need Java 25 to run servers anyway.
 
 Output lands in `build/dist/`:
 
@@ -187,7 +192,7 @@ sirius@node> stop Lobby-1
 | `stop <service\|group\|all> [--force]` | Graceful stop; `--force` kills |
 | `exec <service> <command>` | Runs a single command inside a service |
 | `attach <service>` | Opens that service's console (see below) |
-| `versions [--all]` | Paper versions available to groups |
+| `versions [paper\|velocity] [--all]` | Versions available to groups |
 | `info` | Node status and connected wrappers |
 | `shutdown` | Stops everything, then the node |
 
@@ -247,6 +252,53 @@ Groups that keep failing are retried on a growing delay (5s, 15s, 30s, 60s,
 120s) rather than once a second, and say so after three consecutive failures.
 The delay caps instead of giving up, so a transient cause still recovers on its
 own. Reaching `RUNNING` clears the penalty.
+
+---
+
+## The proxy
+
+Players connect to a Velocity proxy; the proxy connects them onward to a
+server. `velocity.toml` lists **no servers at all** — the node tells the proxy
+about each backend as it becomes reachable, and tells it to forget one the
+moment it goes away:
+
+```
+[siriuscloud]: Registered Lobby-1 at 127.0.0.1:41000 (lobby)
+[siriuscloud]: Unregistered Lobby-1
+[siriuscloud]: Registered Lobby-1 at 127.0.0.1:41000 (lobby)
+```
+
+That is the whole reason to run a cloud rather than a fixed set of servers: a
+static server list would be wrong within seconds of being written. A proxy that
+starts late or restarts is sent every server already running, so it converges on
+the same state as one that was there from the beginning.
+
+- Groups marked **`fallback`** are lobbies. Joining players land on the
+  least-loaded one, and `/hub` (aliases `/lobby`, `/l`) sends them back.
+  Least-loaded rather than random, so a newly started lobby actually takes
+  load instead of being ignored until chance finds it.
+- A server that disappears takes its players with it — they are moved to a
+  lobby with a message, or disconnected with a reason if none is available,
+  rather than left on a dead connection until they time out.
+
+### Player forwarding is secured
+
+Backends run `online-mode=false` so the proxy can authenticate on their behalf.
+On its own that would let anyone who reaches a backend port connect as any
+player, so **Velocity modern forwarding is configured on both ends
+automatically**: the node generates a forwarding secret, the wrapper writes it
+to the proxy's `forwarding.secret` and into each backend's
+`config/paper-global.yml`. A connection without a valid signature is refused.
+
+That secret is separate from the cloud secret wrappers authenticate with —
+it reaches every service directory on every machine, while the cloud secret
+never leaves the wrappers.
+
+Defence in depth is still worth one config line. Backends listen on every
+interface by default, because narrowing that silently would break a proxy on
+another machine. If the proxy is local, set `serviceBindAddress` to
+`127.0.0.1` in `wrapper/config.json`; the wrapper reminds you at every start
+until you do.
 
 ---
 
@@ -359,7 +411,7 @@ a service can only ever authenticate as itself, and the token dies with it.
 | Milestone | Contents |
 |---|---|
 | **1 — Skeleton** ✅ | Node, wrapper, protocol, Paper plugin, provisioning, attach console |
-| **2 — Proxy** | Velocity plugin, dynamic server registration, `/hub`, routing |
+| **2 — Proxy** ✅ | Velocity plugin, dynamic registration, `/hub`, modern forwarding |
 | **3 — Player layer** | Cloud-wide player registry, messaging, transfers, node-side templates |
 | **4 — Modules** | Sign walls, NPCs, REST API, web panel, permissions |
 | **5 — Scale** | Node clustering, leader election, state replication |

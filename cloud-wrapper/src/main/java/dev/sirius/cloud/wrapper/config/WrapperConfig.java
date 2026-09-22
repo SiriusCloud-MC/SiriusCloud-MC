@@ -42,10 +42,32 @@ public final class WrapperConfig {
             "-Dcom.mojang.eula.agree=true",
     };
 
+    /**
+     * Interface backend servers listen on. Empty means every interface.
+     *
+     * <p>Backends run with {@code online-mode=false} and trust the proxy to
+     * authenticate. Modern forwarding means a forged connection needs the
+     * shared secret, but anything reachable on a backend port is still one
+     * layer of defence short. Set this to {@code 127.0.0.1} when the proxy is
+     * on this machine, or to a private address when it is not.
+     *
+     * <p>Left open by default because narrowing it silently would break a
+     * proxy running on a different machine, which is a core use case.
+     */
+    private String serviceBindAddress = "";
+
     /** Whether interactive setup has run. See NodeConfig for why this is tracked. */
     private boolean setupCompleted = false;
 
     private boolean debug = false;
+
+    public String serviceBindAddress() {
+        return serviceBindAddress == null ? "" : serviceBindAddress;
+    }
+
+    public void serviceBindAddress(String serviceBindAddress) {
+        this.serviceBindAddress = serviceBindAddress;
+    }
 
     public boolean setupCompleted() {
         return setupCompleted;

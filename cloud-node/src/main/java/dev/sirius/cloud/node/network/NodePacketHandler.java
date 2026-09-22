@@ -7,8 +7,10 @@ import dev.sirius.cloud.api.logging.CloudLogger;
 import dev.sirius.cloud.api.node.WrapperInfo;
 import dev.sirius.cloud.api.service.ServiceInfo;
 import dev.sirius.cloud.api.service.ServiceState;
+import dev.sirius.cloud.api.service.ServiceType;
 import dev.sirius.cloud.node.config.NodeConfig;
 import dev.sirius.cloud.node.group.GroupRegistry;
+import dev.sirius.cloud.node.service.ServiceChannelRegistry;
 import dev.sirius.cloud.node.service.ServiceManager;
 import dev.sirius.cloud.node.service.ServiceRegistry;
 import dev.sirius.cloud.node.wrapper.ConnectedWrapper;
@@ -27,6 +29,7 @@ import dev.sirius.cloud.protocol.packet.impl.GroupListResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
+import dev.sirius.cloud.protocol.packet.impl.ServiceAvailabilityPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceCrashReportPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceListRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceListResponsePacket;
@@ -52,6 +55,7 @@ public final class NodePacketHandler implements PacketHandler {
     private final WrapperRegistry wrappers;
     private final EventManager events;
     private final NodeConsole console;
+    private final ServiceChannelRegistry serviceChannels;
 
     public NodePacketHandler(NodeConfig config,
                              ServiceManager serviceManager,
@@ -59,7 +63,8 @@ public final class NodePacketHandler implements PacketHandler {
                              GroupRegistry groups,
                              WrapperRegistry wrappers,
                              EventManager events,
-                             NodeConsole console) {
+                             NodeConsole console,
+                             ServiceChannelRegistry serviceChannels) {
         this.config = config;
         this.serviceManager = serviceManager;
         this.services = services;
@@ -67,6 +72,7 @@ public final class NodePacketHandler implements PacketHandler {
         this.wrappers = wrappers;
         this.events = events;
         this.console = console;
+        this.serviceChannels = serviceChannels;
     }
 
     @Override
@@ -202,6 +208,17 @@ public final class NodePacketHandler implements PacketHandler {
             wrappers.register(wrapper);
             events.post(new WrapperConnectedEvent(info));
             LOGGER.info("Wrapper '{}' connected from {} [{}]", handshake.name(), host, handshake.platform());
+        } else if (handshake.type() == ConnectionType.SERVICE && handshake.serviceId() != null) {
+            serviceChannels.register(handshake.serviceId(), channel);
+
+            // A proxy needs the servers that already exist, not only the ones
+            // that appear after it. Without this, restarting a proxy leaves it
+            // blind to every server that was running at the time.
+            services.byId(handshake.serviceId())
+                    .filter(service -> service.type() == ServiceType.PROXY)
+                    .ifPresent(proxy -> seedProxy(channel, proxy.name()));
+
+            LOGGER.debug("{} '{}' connected", handshake.type(), handshake.name());
         } else {
             LOGGER.debug("{} '{}' connected", handshake.type(), handshake.name());
         }
@@ -223,11 +240,19 @@ public final class NodePacketHandler implements PacketHandler {
                 }
             });
         } else if (channel.type() == ConnectionType.SERVICE && channel.serviceId() != null) {
+            serviceChannels.unregister(channel.serviceId());
             // Losing the in-service plugin is not proof the process died; the
             // wrapper reports that. Note it and let the wrapper be authoritative.
             services.byId(channel.serviceId()).ifPresent(service ->
                     LOGGER.debug("Plugin connection for {} closed", service.name()));
         }
+    }
+
+    /** Tells a freshly connected proxy about every server already running. */
+    private void seedProxy(NetworkChannel channel, String proxyName) {
+        List<ServiceInfo> reachable = ServiceChannelRegistry.reachableServers(services);
+        reachable.forEach(server -> channel.send(new ServiceAvailabilityPacket(server, true)));
+        LOGGER.info("Proxy {} connected; sent {} running server(s)", proxyName, reachable.size());
     }
 
     private static String remoteHost(NetworkChannel channel) {

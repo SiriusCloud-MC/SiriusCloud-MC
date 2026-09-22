@@ -10,6 +10,7 @@ import dev.sirius.cloud.protocol.packet.impl.GroupListResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
+import dev.sirius.cloud.protocol.packet.impl.ServiceAvailabilityPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceCrashReportPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceListRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceListResponsePacket;
@@ -86,6 +87,7 @@ public final class PacketRegistry {
                 .register(0x11, ServiceStopPacket.class, ServiceStopPacket::new)
                 .register(0x12, ConsoleCommandPacket.class, ConsoleCommandPacket::new)
                 .register(0x13, ConsoleSubscribePacket.class, ConsoleSubscribePacket::new)
+                .register(0x14, ServiceAvailabilityPacket.class, ServiceAvailabilityPacket::new)
 
                 // 0x20-0x2F — wrapper/service to node
                 .register(0x20, ServiceStateUpdatePacket.class, ServiceStateUpdatePacket::new)

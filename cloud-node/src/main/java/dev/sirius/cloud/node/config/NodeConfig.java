@@ -24,6 +24,15 @@ public final class NodeConfig {
     /** Shared secret wrappers and API clients authenticate with. */
     private String secret = UUID.randomUUID().toString();
 
+    /**
+     * Shared secret for Velocity modern forwarding.
+     *
+     * <p>Separate from {@link #secret}: this one is written into every service
+     * directory on every machine, while the cloud secret only ever reaches
+     * wrappers. Leaking one should not compromise the other.
+     */
+    private String forwardingSecret = UUID.randomUUID().toString();
+
     /** Memory the node is willing to see committed across all services, in MB. */
     private int maxMemory = 4096;
 
@@ -102,6 +111,14 @@ public final class NodeConfig {
 
     public String secret() {
         return secret;
+    }
+
+    public String forwardingSecret() {
+        if (forwardingSecret == null || forwardingSecret.isBlank()) {
+            // Upgrading from a config written before forwarding existed.
+            forwardingSecret = UUID.randomUUID().toString();
+        }
+        return forwardingSecret;
     }
 
     public int maxMemory() {

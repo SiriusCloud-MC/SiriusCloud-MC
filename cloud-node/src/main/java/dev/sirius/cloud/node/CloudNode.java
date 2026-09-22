@@ -7,6 +7,7 @@ import dev.sirius.cloud.api.event.events.ServiceStateChangedEvent;
 import dev.sirius.cloud.api.logging.CloudLogger;
 import dev.sirius.cloud.api.platform.Platform;
 import dev.sirius.cloud.api.service.ServiceInfo;
+import dev.sirius.cloud.api.service.ServiceType;
 import dev.sirius.cloud.driver.event.DefaultEventManager;
 import dev.sirius.cloud.driver.paper.PaperVersionCatalog;
 import dev.sirius.cloud.node.command.CommandManager;
@@ -30,11 +31,13 @@ import dev.sirius.cloud.node.network.NodePacketHandler;
 import dev.sirius.cloud.node.provisioning.GroupBackoff;
 import dev.sirius.cloud.node.provisioning.ProvisioningTask;
 import dev.sirius.cloud.node.service.ServiceManager;
+import dev.sirius.cloud.node.service.ServiceChannelRegistry;
 import dev.sirius.cloud.node.service.ServiceRegistry;
 import dev.sirius.cloud.node.setup.FirstRunSetup;
 import dev.sirius.cloud.node.wrapper.WrapperRegistry;
 import dev.sirius.cloud.protocol.connection.NetworkServer;
 import dev.sirius.cloud.protocol.packet.PacketRegistry;
+import dev.sirius.cloud.protocol.packet.impl.ServiceAvailabilityPacket;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -60,12 +63,14 @@ public final class CloudNode {
 
     private final EventManager events = new DefaultEventManager();
     private final ServiceRegistry services = new ServiceRegistry();
+    private final ServiceChannelRegistry serviceChannels = new ServiceChannelRegistry();
     private final WrapperRegistry wrappers = new WrapperRegistry();
     private final GroupRegistry groups;
     private final ServiceManager serviceManager;
     private final CommandManager commands = new CommandManager();
     private final NetworkServer server = new NetworkServer(PacketRegistry.standard());
-    private final PaperVersionCatalog paperVersions = new PaperVersionCatalog();
+    private final PaperVersionCatalog paperVersions = new PaperVersionCatalog("paper");
+    private final PaperVersionCatalog velocityVersions = new PaperVersionCatalog("velocity");
     private final GroupBackoff backoff = new GroupBackoff();
 
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -142,10 +147,26 @@ public final class CloudNode {
                 default -> {
                 }
             }
+
+            // Proxies learn about backend servers as they become reachable.
+            if (event.current() == dev.sirius.cloud.api.service.ServiceState.RUNNING
+                    && event.service().type() == ServiceType.SERVER) {
+                serviceChannels.broadcastToProxies(services,
+                        new ServiceAvailabilityPacket(event.service(), true));
+            }
+        });
+
+        // A server that has gone must be dropped from every proxy, or players
+        // keep being routed to a port with nothing behind it.
+        events.subscribe(ServiceRemovedEvent.class, event -> {
+            if (event.service().type() == ServiceType.SERVER) {
+                serviceChannels.broadcastToProxies(services,
+                        new ServiceAvailabilityPacket(event.service(), false));
+            }
         });
 
         server.start(config.bindAddress(), config.port(), new NodePacketHandler(
-                config, serviceManager, services, groups, wrappers, events, console));
+                config, serviceManager, services, groups, wrappers, events, console, serviceChannels));
 
         LOGGER.info("Services connect back to {}:{}", config.connectAddress(), config.port());
         LOGGER.info("Wrapper secret: {}", config.secret());
@@ -208,7 +229,7 @@ public final class CloudNode {
         commands.register(new StopCommand(services, serviceManager));
         commands.register(new ExecuteCommand(services, serviceManager));
         commands.register(new AttachCommand(services, serviceManager, console));
-        commands.register(new VersionsCommand(paperVersions, config.minimumPaperVersion()));
+        commands.register(new VersionsCommand(paperVersions, velocityVersions, config.minimumPaperVersion()));
         commands.register(new InfoCommand(config, services, wrappers));
         commands.register(new ShutdownCommand(this));
     }

@@ -42,6 +42,15 @@ public final class ServiceGroup {
     /** While true the provisioning loop leaves this group alone. */
     private boolean maintenance = false;
 
+    /**
+     * Whether players may be sent here on join or by {@code /hub}.
+     *
+     * <p>Lives on the group rather than in proxy configuration so that adding
+     * a lobby group is one decision in one place, and the proxy needs no
+     * knowledge of what the groups are called.
+     */
+    private boolean fallback = false;
+
     /** First port of this group's range; services take the next free one. */
     private int startPort = 41000;
 
@@ -137,6 +146,14 @@ public final class ServiceGroup {
 
     public boolean maintenance() {
         return maintenance;
+    }
+
+    public boolean fallback() {
+        return fallback;
+    }
+
+    public void fallback(boolean fallback) {
+        this.fallback = fallback;
     }
 
     public void maintenance(boolean maintenance) {
