@@ -108,6 +108,79 @@ public final class NodeConsole implements AutoCloseable {
         }
     }
 
+    // ----------------------------------------------------------------- ask
+
+    /** False when there is no TTY, so nothing may block waiting for an answer. */
+    public boolean isInteractive() {
+        return interactive;
+    }
+
+    /**
+     * Asks a question, returning {@code defaultValue} for an empty answer.
+     *
+     * <p>Ctrl+C and EOF also yield the default rather than propagating: an
+     * interrupted setup should fall back to something sane, not leave the node
+     * half-configured.
+     */
+    public String ask(String question, String defaultValue) {
+        String rendered = new AttributedStringBuilder()
+                .style(AttributedStyle.DEFAULT.foreground(AttributedStyle.CYAN))
+                .append("  " + question)
+                .style(AttributedStyle.DEFAULT)
+                .append(defaultValue.isEmpty() ? ": " : " [" + defaultValue + "]: ")
+                .toAnsi();
+
+        try {
+            String line = reader.readLine(rendered);
+            return line == null || line.isBlank() ? defaultValue : line.trim();
+        } catch (UserInterruptException | EndOfFileException exception) {
+            print("");
+            return defaultValue;
+        }
+    }
+
+    /** Asks a yes/no question. */
+    public boolean confirm(String question, boolean defaultYes) {
+        String answer = ask(question, defaultYes ? "Y/n" : "y/N");
+        String normalised = answer.trim().toLowerCase(java.util.Locale.ROOT);
+
+        if (normalised.startsWith("y")) {
+            return true;
+        }
+        if (normalised.startsWith("n")) {
+            return false;
+        }
+        // Includes the untouched "Y/n" placeholder, i.e. the user pressed Enter.
+        return defaultYes;
+    }
+
+    /** Asks for a whole number, re-asking until one is given. */
+    public int askInt(String question, int defaultValue, int minimum, int maximum) {
+        while (true) {
+            String answer = ask(question, String.valueOf(defaultValue));
+            try {
+                int value = Integer.parseInt(answer.trim());
+                if (value < minimum || value > maximum) {
+                    print("  Please enter a number between " + minimum + " and " + maximum + ".");
+                    continue;
+                }
+                return value;
+            } catch (NumberFormatException exception) {
+                print("  '" + answer + "' is not a number.");
+            }
+        }
+    }
+
+    /** A section heading for setup output. */
+    public void heading(String text) {
+        print("");
+        print(new AttributedStringBuilder()
+                .style(AttributedStyle.DEFAULT.foreground(AttributedStyle.BLUE))
+                .append("── " + text + " ──")
+                .style(AttributedStyle.DEFAULT)
+                .toAnsi());
+    }
+
     // ---------------------------------------------------------------- attach
 
     public boolean isAttached() {

@@ -132,6 +132,14 @@ public final class ServiceGroup {
         return version == null || version.isBlank() ? "latest" : version;
     }
 
+    public void version(String version) {
+        this.version = version;
+    }
+
+    public void maxPlayers(int maxPlayers) {
+        this.maxPlayers = maxPlayers;
+    }
+
     public String build() {
         return build == null || build.isBlank() ? "latest" : build;
     }

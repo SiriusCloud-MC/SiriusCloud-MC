@@ -2,7 +2,6 @@ package dev.sirius.cloud.node.group;
 
 import dev.sirius.cloud.api.group.ServiceGroup;
 import dev.sirius.cloud.api.logging.CloudLogger;
-import dev.sirius.cloud.api.service.ServiceType;
 import dev.sirius.cloud.driver.config.JsonConfig;
 
 import java.io.IOException;
@@ -52,10 +51,10 @@ public final class GroupRegistry {
             });
         }
 
-        if (groups.isEmpty()) {
-            LOGGER.info("No groups configured, creating the default 'Lobby' group");
-            create(new ServiceGroup("Lobby", ServiceType.SERVER));
-        }
+    }
+
+    public boolean isEmpty() {
+        return groups.isEmpty();
     }
 
     public ServiceGroup create(ServiceGroup group) throws IOException {

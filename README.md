@@ -95,8 +95,30 @@ build/dist/
 cd build/dist && ./start-node.sh
 ```
 
-On first run it writes `node/config.json` with a generated `secret` and creates
-a default `Lobby` group. It prints the secret to the console.
+On first run it writes `node/config.json` with a generated `secret`, prints it,
+and asks whether you want a first group:
+
+```
+── First-time setup ──
+  This node has no groups yet. A group is a template that
+  servers are started from - a 'Lobby' group gives you lobby servers.
+
+  Create a Lobby group now? [Y/n]: y
+  Group name [Lobby]: Lobby
+  Memory per server in MB [1024]: 2048
+  Servers to keep online [1]: 1
+  Max players per server [50]: 60
+  Minecraft version ('latest' = newest stable) [latest]: latest
+
+[INFO] [Setup] Created group 'Lobby' (2048MB, keeping 1 online, Paper latest)
+[INFO] [Setup] Lobby-1 will start as soon as a wrapper connects.
+```
+
+Every question has a default, so pressing Enter through it is fine. Declining
+is remembered rather than re-asked on every start — run `setup` whenever you
+want a group. With no terminal to ask on (systemd, a container without `-t`,
+piped stdin) it creates a default `Lobby` instead of hanging on a prompt that
+can never be answered.
 
 **2. Give the wrapper that secret.** Start it once to generate its config, then
 copy `secret` from `node/config.json` into `wrapper/config.json`.
@@ -120,6 +142,7 @@ sirius@node> stop Lobby-1
 | Command | What it does |
 |---|---|
 | `help` | Lists every command |
+| `setup` | Creates a group interactively |
 | `services` / `ls` | Every known service with state, address, uptime |
 | `groups` | Configured groups and how many of each are online |
 | `start <group> [count]` | Starts services |

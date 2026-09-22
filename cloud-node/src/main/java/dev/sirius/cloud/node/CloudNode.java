@@ -16,6 +16,7 @@ import dev.sirius.cloud.node.command.commands.GroupsCommand;
 import dev.sirius.cloud.node.command.commands.HelpCommand;
 import dev.sirius.cloud.node.command.commands.InfoCommand;
 import dev.sirius.cloud.node.command.commands.ServicesCommand;
+import dev.sirius.cloud.node.command.commands.SetupCommand;
 import dev.sirius.cloud.node.command.commands.ShutdownCommand;
 import dev.sirius.cloud.node.command.commands.StartCommand;
 import dev.sirius.cloud.node.command.commands.StopCommand;
@@ -29,6 +30,7 @@ import dev.sirius.cloud.node.provisioning.GroupBackoff;
 import dev.sirius.cloud.node.provisioning.ProvisioningTask;
 import dev.sirius.cloud.node.service.ServiceManager;
 import dev.sirius.cloud.node.service.ServiceRegistry;
+import dev.sirius.cloud.node.setup.FirstRunSetup;
 import dev.sirius.cloud.node.wrapper.WrapperRegistry;
 import dev.sirius.cloud.protocol.connection.NetworkServer;
 import dev.sirius.cloud.protocol.packet.PacketRegistry;
@@ -100,7 +102,20 @@ public final class CloudNode {
         printBanner();
 
         groups.load();
-        registerCommands();
+
+        FirstRunSetup setup = new FirstRunSetup(console, groups, config);
+        registerCommands(setup);
+
+        // Offered once, then remembered either way. Tracked in the config
+        // rather than inferred from "are there groups", so declining is not
+        // re-asked on every single start.
+        if (!config.setupCompleted()) {
+            if (groups.isEmpty()) {
+                setup.run(true);
+            }
+            config.setupCompleted(true);
+            JsonConfig.save(workingDirectory.resolve("config.json"), config);
+        }
 
         CloudDriver.bind(new LocalCloudDriver(serviceManager, services, groups, events));
 
@@ -175,8 +190,9 @@ public final class CloudNode {
         LOGGER.info("Goodbye.");
     }
 
-    private void registerCommands() {
+    private void registerCommands(FirstRunSetup setup) {
         commands.register(new HelpCommand(commands));
+        commands.register(new SetupCommand(setup));
         commands.register(new ServicesCommand(services));
         commands.register(new GroupsCommand(groups, services));
         commands.register(new StartCommand(groups, serviceManager));

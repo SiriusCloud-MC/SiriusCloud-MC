@@ -36,7 +36,23 @@ public final class NodeConfig {
      */
     private String minimumPaperVersion = "1.21.1";
 
+    /**
+     * Whether first-run setup has been offered.
+     *
+     * <p>Tracked separately from "are there any groups", so declining the offer
+     * is remembered instead of being asked again on every start.
+     */
+    private boolean setupCompleted = false;
+
     private boolean debug = false;
+
+    public boolean setupCompleted() {
+        return setupCompleted;
+    }
+
+    public void setupCompleted(boolean setupCompleted) {
+        this.setupCompleted = setupCompleted;
+    }
 
     public String minimumPaperVersion() {
         return minimumPaperVersion == null || minimumPaperVersion.isBlank()
