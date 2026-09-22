@@ -5,11 +5,16 @@ import dev.sirius.cloud.api.event.events.WrapperConnectedEvent;
 import dev.sirius.cloud.api.event.events.WrapperDisconnectedEvent;
 import dev.sirius.cloud.api.logging.CloudLogger;
 import dev.sirius.cloud.api.node.WrapperInfo;
+import dev.sirius.cloud.api.player.CloudPlayer;
+import dev.sirius.cloud.api.event.events.PlayerConnectEvent;
+import dev.sirius.cloud.api.event.events.PlayerDisconnectEvent;
+import dev.sirius.cloud.api.event.events.PlayerSwitchServerEvent;
 import dev.sirius.cloud.api.service.ServiceInfo;
 import dev.sirius.cloud.api.service.ServiceState;
 import dev.sirius.cloud.api.service.ServiceType;
 import dev.sirius.cloud.node.config.NodeConfig;
 import dev.sirius.cloud.node.group.GroupRegistry;
+import dev.sirius.cloud.node.player.PlayerRegistry;
 import dev.sirius.cloud.node.service.ServiceChannelRegistry;
 import dev.sirius.cloud.node.service.ServiceManager;
 import dev.sirius.cloud.node.service.ServiceRegistry;
@@ -29,6 +34,12 @@ import dev.sirius.cloud.protocol.packet.impl.GroupListResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerDisconnectPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerListRequestPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerListResponsePacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerLoginPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerSnapshotPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerSwitchServerPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceAvailabilityPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceCrashReportPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceListRequestPacket;
@@ -57,6 +68,7 @@ public final class NodePacketHandler implements PacketHandler {
     private final EventManager events;
     private final NodeConsole console;
     private final ServiceChannelRegistry serviceChannels;
+    private final PlayerRegistry players;
 
     public NodePacketHandler(NodeConfig config,
                              ServiceManager serviceManager,
@@ -65,7 +77,8 @@ public final class NodePacketHandler implements PacketHandler {
                              WrapperRegistry wrappers,
                              EventManager events,
                              NodeConsole console,
-                             ServiceChannelRegistry serviceChannels) {
+                             ServiceChannelRegistry serviceChannels,
+                             PlayerRegistry players) {
         this.config = config;
         this.serviceManager = serviceManager;
         this.services = services;
@@ -74,6 +87,7 @@ public final class NodePacketHandler implements PacketHandler {
         this.events = events;
         this.console = console;
         this.serviceChannels = serviceChannels;
+        this.players = players;
     }
 
     @Override
@@ -105,6 +119,40 @@ public final class NodePacketHandler implements PacketHandler {
                 serviceManager.transition(service, ServiceState.RUNNING);
                 LOGGER.info("{} is ready on port {} ({})", service.name(), service.port(), ready.version());
             });
+
+        } else if (packet instanceof PlayerLoginPacket login) {
+            players.add(login.player());
+            events.post(new PlayerConnectEvent(login.player()));
+            LOGGER.info("{} joined via {} ({} online)",
+                    login.player().name(), login.player().proxyName(), players.count());
+
+        } else if (packet instanceof PlayerDisconnectPacket disconnect) {
+            players.remove(disconnect.playerId()).ifPresent(player -> {
+                events.post(new PlayerDisconnectEvent(player));
+                LOGGER.info("{} left ({} online)", player.name(), players.count());
+            });
+
+        } else if (packet instanceof PlayerSwitchServerPacket switched) {
+            players.byId(switched.playerId()).ifPresent(player -> {
+                String previous = player.serverName().orElse(null);
+                player.server(switched.serverId(), switched.serverName());
+                events.post(new PlayerSwitchServerEvent(player, previous));
+                LOGGER.debug("{}: {} -> {}", player.name(), previous, switched.serverName());
+            });
+
+        } else if (packet instanceof PlayerSnapshotPacket snapshot) {
+            List<CloudPlayer> dropped =
+                    players.replaceProxyPlayers(snapshot.proxyId(), snapshot.players());
+            if (!snapshot.players().isEmpty() || !dropped.isEmpty()) {
+                LOGGER.info("Proxy re-synced: {} player(s) online, {} stale entr(ies) dropped",
+                        snapshot.players().size(), dropped.size());
+            }
+
+        } else if (packet instanceof PlayerListRequestPacket request) {
+            List<CloudPlayer> result = request.serviceFilter() == null
+                    ? new ArrayList<>(players.all())
+                    : players.onService(request.serviceFilter());
+            channel.respond(request, new PlayerListResponsePacket(result));
 
         } else if (packet instanceof ServicePlayerUpdatePacket update) {
             services.byId(update.serviceId()).ifPresent(service -> {
@@ -259,6 +307,16 @@ public final class NodePacketHandler implements PacketHandler {
             });
         } else if (channel.type() == ConnectionType.SERVICE && channel.serviceId() != null) {
             serviceChannels.unregister(channel.serviceId());
+
+            // Players reached the cloud through that proxy; with it gone they
+            // are gone too, and leaving them listed would have the node trying
+            // to act on people who are not there.
+            List<CloudPlayer> lost = players.removeProxyPlayers(channel.serviceId());
+            lost.forEach(player -> events.post(new PlayerDisconnectEvent(player)));
+            if (!lost.isEmpty()) {
+                LOGGER.warn("Proxy {} went away, dropping {} player(s)",
+                        channel.name(), lost.size());
+            }
             // Losing the in-service plugin is not proof the process died; the
             // wrapper reports that. Note it and let the wrapper be authoritative.
             services.byId(channel.serviceId()).ifPresent(service ->

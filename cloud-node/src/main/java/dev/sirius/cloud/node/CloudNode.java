@@ -12,10 +12,13 @@ import dev.sirius.cloud.driver.event.DefaultEventManager;
 import dev.sirius.cloud.driver.paper.PaperVersionCatalog;
 import dev.sirius.cloud.node.command.CommandManager;
 import dev.sirius.cloud.node.command.commands.AttachCommand;
+import dev.sirius.cloud.node.command.commands.BroadcastCommand;
 import dev.sirius.cloud.node.command.commands.ExecuteCommand;
 import dev.sirius.cloud.node.command.commands.GroupsCommand;
 import dev.sirius.cloud.node.command.commands.HelpCommand;
 import dev.sirius.cloud.node.command.commands.InfoCommand;
+import dev.sirius.cloud.node.command.commands.PlayerCommand;
+import dev.sirius.cloud.node.command.commands.PlayersCommand;
 import dev.sirius.cloud.node.command.commands.ServicesCommand;
 import dev.sirius.cloud.node.command.commands.SetupCommand;
 import dev.sirius.cloud.node.command.commands.ShutdownCommand;
@@ -28,6 +31,8 @@ import dev.sirius.cloud.node.config.NodeConfig;
 import dev.sirius.cloud.node.console.NodeConsole;
 import dev.sirius.cloud.node.group.GroupRegistry;
 import dev.sirius.cloud.node.network.NodePacketHandler;
+import dev.sirius.cloud.node.player.PlayerManager;
+import dev.sirius.cloud.node.player.PlayerRegistry;
 import dev.sirius.cloud.node.provisioning.GroupBackoff;
 import dev.sirius.cloud.node.provisioning.ProvisioningTask;
 import dev.sirius.cloud.node.service.ServiceManager;
@@ -64,9 +69,11 @@ public final class CloudNode {
     private final EventManager events = new DefaultEventManager();
     private final ServiceRegistry services = new ServiceRegistry();
     private final ServiceChannelRegistry serviceChannels = new ServiceChannelRegistry();
+    private final PlayerRegistry players = new PlayerRegistry();
     private final WrapperRegistry wrappers = new WrapperRegistry();
     private final GroupRegistry groups;
     private final ServiceManager serviceManager;
+    private final PlayerManager playerManager;
     private final CommandManager commands = new CommandManager();
     private final NetworkServer server = new NetworkServer(PacketRegistry.standard());
     private final PaperVersionCatalog paperVersions = new PaperVersionCatalog("paper");
@@ -96,6 +103,7 @@ public final class CloudNode {
         this.groups = new GroupRegistry(workingDirectory.resolve("groups"));
 
         this.serviceManager = new ServiceManager(config, groups, services, wrappers, events);
+        this.playerManager = new PlayerManager(players, services, serviceChannels);
 
         instance = this;
     }
@@ -128,7 +136,8 @@ public final class CloudNode {
             JsonConfig.save(configFile, config);
         }
 
-        CloudDriver.bind(new LocalCloudDriver(serviceManager, services, groups, events));
+        CloudDriver.bind(new LocalCloudDriver(
+                serviceManager, services, groups, events, players, playerManager));
 
         // An attached console must not outlive the service it is attached to.
         // Doing this through the event bus rather than a call inside
@@ -166,7 +175,8 @@ public final class CloudNode {
         });
 
         server.start(config.bindAddress(), config.port(), new NodePacketHandler(
-                config, serviceManager, services, groups, wrappers, events, console, serviceChannels));
+                config, serviceManager, services, groups, wrappers, events, console,
+                serviceChannels, players));
 
         LOGGER.info("Services connect back to {}:{}", config.connectAddress(), config.port());
         LOGGER.info("Wrapper secret: {}", config.secret());
@@ -224,6 +234,9 @@ public final class CloudNode {
         commands.register(new HelpCommand(commands));
         commands.register(new SetupCommand(setup));
         commands.register(new ServicesCommand(services));
+        commands.register(new PlayersCommand(players));
+        commands.register(new PlayerCommand(players, playerManager, services, groups));
+        commands.register(new BroadcastCommand(playerManager));
         commands.register(new GroupsCommand(groups, services));
         commands.register(new StartCommand(groups, serviceManager));
         commands.register(new StopCommand(services, serviceManager));
@@ -272,6 +285,14 @@ public final class CloudNode {
 
     public ServiceManager serviceManager() {
         return serviceManager;
+    }
+
+    public PlayerRegistry players() {
+        return players;
+    }
+
+    public PlayerManager playerManager() {
+        return playerManager;
     }
 
     public CommandManager commands() {

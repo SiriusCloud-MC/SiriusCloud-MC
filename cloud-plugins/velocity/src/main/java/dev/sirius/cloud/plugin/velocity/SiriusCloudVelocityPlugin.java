@@ -4,7 +4,10 @@ import com.google.inject.Inject;
 import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.event.Subscribe;
+import com.velocitypowered.api.event.connection.DisconnectEvent;
+import com.velocitypowered.api.event.connection.PostLoginEvent;
 import com.velocitypowered.api.event.player.PlayerChooseInitialServerEvent;
+import com.velocitypowered.api.event.player.ServerPostConnectEvent;
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent;
 import com.velocitypowered.api.event.proxy.ProxyPingEvent;
 import com.velocitypowered.api.event.proxy.ProxyShutdownEvent;
@@ -17,6 +20,7 @@ import com.velocitypowered.api.proxy.server.ServerPing;
 import dev.sirius.cloud.api.driver.CloudDriver;
 import dev.sirius.cloud.api.logging.CloudLogger;
 import dev.sirius.cloud.api.platform.Platform;
+import dev.sirius.cloud.api.player.CloudPlayer;
 import dev.sirius.cloud.api.service.ServiceInfo;
 import dev.sirius.cloud.api.service.ServiceState;
 import dev.sirius.cloud.driver.RemoteCloudDriver;
@@ -29,6 +33,13 @@ import dev.sirius.cloud.protocol.packet.PacketRegistry;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerConnectRequestPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerDisconnectPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerKickPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerLoginPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerMessagePacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerSnapshotPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerSwitchServerPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceAvailabilityPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServicePlayerUpdatePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceReadyPacket;
@@ -43,6 +54,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
@@ -172,6 +184,82 @@ public final class SiriusCloudVelocityPlugin {
                 .filter(Optional::isPresent)
                 .map(Optional::get)
                 .min(Comparator.comparingInt(server -> server.getPlayersConnected().size()));
+    }
+
+    // -------------------------------------------------------------- players
+
+    /**
+     * Reports a join to the node.
+     *
+     * <p>{@code PostLoginEvent} rather than {@code LoginEvent}: the latter can
+     * still be cancelled, and announcing a player who is then refused would
+     * leave the node holding someone who never arrived.
+     */
+    @Subscribe
+    public void onPostLogin(PostLoginEvent event) {
+        if (client == null) {
+            return;
+        }
+        client.send(new PlayerLoginPacket(toCloudPlayer(event.getPlayer())));
+    }
+
+    @Subscribe
+    public void onDisconnect(DisconnectEvent event) {
+        if (client == null) {
+            return;
+        }
+        client.send(new PlayerDisconnectPacket(event.getPlayer().getUniqueId()));
+    }
+
+    /**
+     * Reports where a player ended up.
+     *
+     * <p>Post-connect rather than pre: only once the connection succeeded is
+     * the player actually there, and a failed attempt must not move them in
+     * the node's view.
+     */
+    @Subscribe
+    public void onServerPostConnect(ServerPostConnectEvent event) {
+        if (client == null) {
+            return;
+        }
+        event.getPlayer().getCurrentServer().ifPresent(current -> {
+            String name = current.getServerInfo().getName();
+            client.send(new PlayerSwitchServerPacket(
+                    event.getPlayer().getUniqueId(), serviceIdOf(name), name));
+        });
+    }
+
+    private CloudPlayer toCloudPlayer(Player player) {
+        return new CloudPlayer(
+                player.getUniqueId(),
+                player.getUsername(),
+                connection.serviceId(),
+                connection.serviceName(),
+                player.getRemoteAddress().getAddress().getHostAddress());
+    }
+
+    /** Maps a registered server name back to the service id the node knows. */
+    private UUID serviceIdOf(String serverName) {
+        return backends.entrySet().stream()
+                .filter(entry -> entry.getValue().info().getName().equals(serverName))
+                .map(Map.Entry::getKey)
+                .findFirst()
+                .orElse(null);
+    }
+
+    /** Everyone currently connected, for the snapshot sent on (re)connect. */
+    private List<CloudPlayer> currentPlayers() {
+        List<CloudPlayer> snapshot = new ArrayList<>();
+        for (Player player : proxy.getAllPlayers()) {
+            CloudPlayer cloudPlayer = toCloudPlayer(player);
+            player.getCurrentServer().ifPresent(current -> {
+                String name = current.getServerInfo().getName();
+                cloudPlayer.server(serviceIdOf(name), name);
+            });
+            snapshot.add(cloudPlayer);
+        }
+        return snapshot;
     }
 
     // ------------------------------------------------------------- capacity
@@ -338,6 +426,11 @@ public final class SiriusCloudVelocityPlugin {
                     channel.authenticated(true);
                     authenticated.set(true);
                     sendReadyIfPossible();
+
+                    // Whoever is already online would otherwise be invisible to
+                    // a node that restarted under them.
+                    channel.send(new PlayerSnapshotPacket(
+                            connection.serviceId(), currentPlayers()));
                 } else {
                     logger.warn("The node rejected this proxy: {}", response.message());
                     channel.close();
@@ -347,6 +440,25 @@ public final class SiriusCloudVelocityPlugin {
 
             if (packet instanceof ServiceAvailabilityPacket availability) {
                 setAvailable(availability.service(), availability.available());
+
+            } else if (packet instanceof PlayerConnectRequestPacket request) {
+                proxy.getPlayer(request.playerId()).ifPresent(player ->
+                        proxy.getServer(request.serviceName()).ifPresentOrElse(
+                                target -> player.createConnectionRequest(target).fireAndForget(),
+                                () -> logger.warn("Asked to send {} to unknown server {}",
+                                        player.getUsername(), request.serviceName())));
+
+            } else if (packet instanceof PlayerMessagePacket message) {
+                Component text = Component.text(message.message());
+                if (message.isBroadcast()) {
+                    proxy.getAllPlayers().forEach(player -> player.sendMessage(text));
+                } else {
+                    proxy.getPlayer(message.playerId()).ifPresent(player -> player.sendMessage(text));
+                }
+
+            } else if (packet instanceof PlayerKickPacket kick) {
+                proxy.getPlayer(kick.playerId()).ifPresent(player ->
+                        player.disconnect(Component.text(kick.reason(), NamedTextColor.RED)));
             }
         }
 

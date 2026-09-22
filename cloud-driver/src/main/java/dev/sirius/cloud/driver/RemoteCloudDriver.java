@@ -2,7 +2,9 @@ package dev.sirius.cloud.driver;
 
 import dev.sirius.cloud.api.driver.CloudDriver;
 import dev.sirius.cloud.api.driver.GroupProvider;
+import dev.sirius.cloud.api.driver.PlayerProvider;
 import dev.sirius.cloud.api.driver.ServiceProvider;
+import dev.sirius.cloud.api.player.CloudPlayer;
 import dev.sirius.cloud.api.event.EventManager;
 import dev.sirius.cloud.api.service.ServiceInfo;
 import dev.sirius.cloud.driver.event.DefaultEventManager;
@@ -24,6 +26,7 @@ public final class RemoteCloudDriver implements CloudDriver {
     private final NetworkClient client;
     private final RemoteServiceProvider services;
     private final RemoteGroupProvider groups;
+    private final RemotePlayerProvider players;
     private final EventManager events = new DefaultEventManager();
 
     public RemoteCloudDriver(String environment, NetworkClient client) {
@@ -31,11 +34,17 @@ public final class RemoteCloudDriver implements CloudDriver {
         this.client = client;
         this.services = new RemoteServiceProvider(client);
         this.groups = new RemoteGroupProvider(client);
+        this.players = new RemotePlayerProvider(client);
     }
 
     @Override
     public ServiceProvider services() {
         return services;
+    }
+
+    @Override
+    public PlayerProvider players() {
+        return players;
     }
 
     @Override
@@ -64,5 +73,14 @@ public final class RemoteCloudDriver implements CloudDriver {
 
     public void evictService(UUID uniqueId) {
         services.evictFromCache(uniqueId);
+    }
+
+    /** Called by the owning process when the node reports a player change. */
+    public void cachePlayer(CloudPlayer player) {
+        players.cachePlayer(player);
+    }
+
+    public void evictPlayer(UUID uniqueId) {
+        players.evictPlayer(uniqueId);
     }
 }

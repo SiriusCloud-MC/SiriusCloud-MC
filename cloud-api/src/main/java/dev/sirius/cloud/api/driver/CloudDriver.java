@@ -14,6 +14,8 @@ public interface CloudDriver {
 
     ServiceProvider services();
 
+    PlayerProvider players();
+
     GroupProvider groups();
 
     EventManager events();

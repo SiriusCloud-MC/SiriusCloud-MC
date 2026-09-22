@@ -56,6 +56,7 @@ public final class ServicesCommand implements Command {
         CloudLogger.raw(all.size() + " service(s).");
     }
 
+    /** Shared with the player commands, which show the same kind of duration. */
     static String formatUptime(long millis) {
         long seconds = millis / 1000;
         if (seconds < 60) {

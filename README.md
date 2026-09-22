@@ -190,6 +190,9 @@ sirius@node> stop Lobby-1
 | `groups` | Configured groups and how many of each are online |
 | `start <group> [count]` | Starts services |
 | `stop <service\|group\|all> [--force]` | Graceful stop; `--force` kills |
+| `players [service]` | Everyone online, across every proxy |
+| `player <name> …` | Info, or `send`/`msg`/`kick` |
+| `broadcast <message>` | Message every player on every proxy |
 | `exec <service> <command>` | Runs a single command inside a service |
 | `attach <service>` | Opens that service's console (see below) |
 | `versions [paper\|velocity] [--all]` | Versions available to groups |
@@ -324,6 +327,51 @@ until you do.
 
 ---
 
+## Players
+
+The node keeps a cloud-wide registry of who is online and where, fed by the
+proxies. Every operation resolves to "which proxy holds this player" and sends
+it one packet, so callers never need to know which proxy that is — that is what
+makes one cloud out of several of them.
+
+```
+sirius@node> players
+NAME               SERVER             PROXY          ONLINE     ADDRESS
+Sirius             Lobby-1            Proxy-1        4m12s      127.0.0.1
+1 player(s).
+
+sirius@node> player Sirius send Survival
+sirius@node> player Sirius msg Welcome back
+sirius@node> player Sirius kick Testing
+sirius@node> broadcast Server restarting in 5 minutes
+```
+
+`player <name> send <target>` takes either a service name or a group name. A
+name matching a service goes there exactly; anything else is treated as a group
+and the node picks the least-loaded running instance. **Balancing lives on the
+node**, not the proxy, so every caller gets the same behaviour and a proxy needs
+no notion of what a group is.
+
+The same reach is available to plugins through `CloudDriver.players()` — a
+plugin on one lobby can move, message or kick a player who is on a different
+server behind a different proxy, without knowing any of that is true.
+
+### Surviving restarts
+
+A proxy sends a **snapshot** of everyone connected right after it handshakes,
+and that snapshot *replaces* what the node believed about that proxy rather
+than adding to it. Both halves matter:
+
+- Restart the node under a busy cloud and the players who stayed online would
+  otherwise be invisible to it forever, since their join events are long past.
+- A proxy that died without saying goodbye leaves ghosts the node would
+  keep trying to act on.
+
+A proxy dropping also removes its players, since they reached the cloud through
+it and are gone with it.
+
+---
+
 ## Templates
 
 Files that should exist in every service of a group go in the wrapper's
@@ -434,7 +482,8 @@ a service can only ever authenticate as itself, and the token dies with it.
 |---|---|
 | **1 — Skeleton** ✅ | Node, wrapper, protocol, Paper plugin, provisioning, attach console |
 | **2 — Proxy** ✅ | Velocity plugin, dynamic registration, `/hub`, modern forwarding |
-| **3 — Player layer** | Cloud-wide player registry, messaging, transfers, node-side templates |
+| **3 — Player layer** ✅ | Registry, transfers, messaging, kicks, restart re-sync |
+| **3b — Node-side templates** | Template storage on the node, pushed to wrappers |
 | **4 — Modules** | Sign walls, NPCs, REST API, web panel, permissions |
 | **5 — Scale** | Node clustering, leader election, state replication |
 

@@ -10,6 +10,15 @@ import dev.sirius.cloud.protocol.packet.impl.GroupListResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerConnectRequestPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerDisconnectPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerKickPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerListRequestPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerListResponsePacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerLoginPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerMessagePacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerSnapshotPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerSwitchServerPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceAvailabilityPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceCrashReportPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceListRequestPacket;
@@ -104,6 +113,17 @@ public final class PacketRegistry {
                 .register(0x32, ServiceStartRequestPacket.class, ServiceStartRequestPacket::new)
                 .register(0x33, ServiceStartResponsePacket.class, ServiceStartResponsePacket::new)
                 .register(0x34, GroupListRequestPacket.class, GroupListRequestPacket::new)
-                .register(0x35, GroupListResponsePacket.class, GroupListResponsePacket::new);
+                .register(0x35, GroupListResponsePacket.class, GroupListResponsePacket::new)
+
+                // 0x40-0x4F - players
+                .register(0x40, PlayerLoginPacket.class, PlayerLoginPacket::new)
+                .register(0x41, PlayerDisconnectPacket.class, PlayerDisconnectPacket::new)
+                .register(0x42, PlayerSwitchServerPacket.class, PlayerSwitchServerPacket::new)
+                .register(0x43, PlayerSnapshotPacket.class, PlayerSnapshotPacket::new)
+                .register(0x44, PlayerConnectRequestPacket.class, PlayerConnectRequestPacket::new)
+                .register(0x45, PlayerMessagePacket.class, PlayerMessagePacket::new)
+                .register(0x46, PlayerKickPacket.class, PlayerKickPacket::new)
+                .register(0x47, PlayerListRequestPacket.class, PlayerListRequestPacket::new)
+                .register(0x48, PlayerListResponsePacket.class, PlayerListResponsePacket::new);
     }
 }

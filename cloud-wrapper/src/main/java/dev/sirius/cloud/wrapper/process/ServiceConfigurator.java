@@ -14,6 +14,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
@@ -124,6 +125,26 @@ public final class ServiceConfigurator {
         }
     }
 
+    /** Forces {@code bind} in an existing velocity.toml to the allocated port. */
+    private static void rewriteBindPort(Path path, int port) throws IOException {
+        List<String> lines = Files.readAllLines(path, StandardCharsets.UTF_8);
+        String replacement = "bind = \"0.0.0.0:" + port + "\"";
+
+        boolean replaced = false;
+        for (int i = 0; i < lines.size(); i++) {
+            if (lines.get(i).stripLeading().startsWith("bind")) {
+                lines.set(i, replacement);
+                replaced = true;
+                break;
+            }
+        }
+        if (!replaced) {
+            lines.add(0, replacement);
+        }
+
+        Files.write(path, lines, StandardCharsets.UTF_8);
+    }
+
     // ----------------------------------------------------------------- proxy
 
     /**
@@ -140,9 +161,14 @@ public final class ServiceConfigurator {
 
         Path path = directory.resolve("velocity.toml");
         if (Files.isRegularFile(path)) {
-            // A template supplied one deliberately; only the bind port has to
-            // match what the node allocated.
-            LOGGER.debug("Keeping the template's velocity.toml for {}", info.name());
+            // A template supplied one deliberately, so keep every choice in it
+            // except the listen port: that one is the node's to assign. A
+            // template hardcoding it would collide with every other proxy from
+            // the same template, and leave the node advertising an address
+            // nothing is listening on.
+            rewriteBindPort(path, info.port());
+            LOGGER.debug("Kept the template's velocity.toml for {}, bind set to {}",
+                    info.name(), info.port());
             return;
         }
 
