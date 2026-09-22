@@ -1,0 +1,18 @@
+build/
+.gradle/
+out/
+bin/
+*.class
+*.log
+
+# runtime state
+node/config.json
+node/groups/
+node/local/
+wrapper/config.json
+wrapper/local/
+
+.idea/
+*.iml
+.vscode/
+.DS_Store

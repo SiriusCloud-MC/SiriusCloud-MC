@@ -1,0 +1,23 @@
+[versions]
+netty = "4.1.115.Final"
+gson = "2.11.0"
+jline = "3.26.3"
+paper = "1.21.4-R0.1-SNAPSHOT"
+shadow = "8.3.5"
+
+[libraries]
+netty-handler = { module = "io.netty:netty-handler", version.ref = "netty" }
+netty-codec = { module = "io.netty:netty-codec", version.ref = "netty" }
+netty-transport = { module = "io.netty:netty-transport", version.ref = "netty" }
+gson = { module = "com.google.code.gson:gson", version.ref = "gson" }
+jline-reader = { module = "org.jline:jline-reader", version.ref = "jline" }
+jline-terminal = { module = "org.jline:jline-terminal", version.ref = "jline" }
+jline-terminal-jni = { module = "org.jline:jline-terminal-jni", version.ref = "jline" }
+paper-api = { module = "io.papermc.paper:paper-api", version.ref = "paper" }
+
+[bundles]
+netty = ["netty-handler", "netty-codec", "netty-transport"]
+jline = ["jline-reader", "jline-terminal", "jline-terminal-jni"]
+
+[plugins]
+shadow = { id = "com.gradleup.shadow", version.ref = "shadow" }

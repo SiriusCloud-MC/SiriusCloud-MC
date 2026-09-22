@@ -1,0 +1,204 @@
+package dev.sirius.cloud.node;
+
+import dev.sirius.cloud.api.driver.CloudDriver;
+import dev.sirius.cloud.api.event.EventManager;
+import dev.sirius.cloud.api.logging.CloudLogger;
+import dev.sirius.cloud.api.platform.Platform;
+import dev.sirius.cloud.api.service.ServiceInfo;
+import dev.sirius.cloud.driver.event.DefaultEventManager;
+import dev.sirius.cloud.node.command.CommandManager;
+import dev.sirius.cloud.node.command.commands.ExecuteCommand;
+import dev.sirius.cloud.node.command.commands.GroupsCommand;
+import dev.sirius.cloud.node.command.commands.HelpCommand;
+import dev.sirius.cloud.node.command.commands.InfoCommand;
+import dev.sirius.cloud.node.command.commands.ServicesCommand;
+import dev.sirius.cloud.node.command.commands.ShutdownCommand;
+import dev.sirius.cloud.node.command.commands.StartCommand;
+import dev.sirius.cloud.node.command.commands.StopCommand;
+import dev.sirius.cloud.driver.config.JsonConfig;
+import dev.sirius.cloud.node.config.NodeConfig;
+import dev.sirius.cloud.node.console.NodeConsole;
+import dev.sirius.cloud.node.group.GroupRegistry;
+import dev.sirius.cloud.node.network.NodePacketHandler;
+import dev.sirius.cloud.node.provisioning.ProvisioningTask;
+import dev.sirius.cloud.node.service.ServiceManager;
+import dev.sirius.cloud.node.service.ServiceRegistry;
+import dev.sirius.cloud.node.wrapper.WrapperRegistry;
+import dev.sirius.cloud.protocol.connection.NetworkServer;
+import dev.sirius.cloud.protocol.packet.PacketRegistry;
+
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Collection;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+
+/** Wires everything together and owns the node's lifecycle. */
+public final class CloudNode {
+
+    private static final CloudLogger LOGGER = CloudLogger.of("CloudNode");
+
+    /** How long a graceful shutdown waits for services to save and exit. */
+    private static final int SHUTDOWN_GRACE_SECONDS = 30;
+
+    private static volatile CloudNode instance;
+
+    private final Path workingDirectory;
+    private final NodeConfig config;
+
+    private final EventManager events = new DefaultEventManager();
+    private final ServiceRegistry services = new ServiceRegistry();
+    private final WrapperRegistry wrappers = new WrapperRegistry();
+    private final GroupRegistry groups;
+    private final ServiceManager serviceManager;
+    private final CommandManager commands = new CommandManager();
+    private final NetworkServer server = new NetworkServer(PacketRegistry.standard());
+
+    private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "sirius-scheduler");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    private final AtomicBoolean shuttingDown = new AtomicBoolean();
+
+    private NodeConsole console;
+
+    public CloudNode(Path workingDirectory) throws IOException {
+        this.workingDirectory = workingDirectory;
+
+        Files.createDirectories(workingDirectory.resolve("local"));
+
+        this.config = JsonConfig.loadOrCreate(
+                workingDirectory.resolve("config.json"), NodeConfig.class, NodeConfig::new);
+        CloudLogger.debugEnabled(config.debug());
+
+        this.groups = new GroupRegistry(workingDirectory.resolve("groups"));
+
+        this.serviceManager = new ServiceManager(config, groups, services, wrappers, events);
+
+        instance = this;
+    }
+
+    public static CloudNode instance() {
+        return instance;
+    }
+
+    public void start() throws Exception {
+        console = new NodeConsole(commands, workingDirectory.resolve("local").resolve("console_history"));
+        printBanner();
+
+        groups.load();
+        registerCommands();
+
+        CloudDriver.bind(new LocalCloudDriver(serviceManager, services, groups, events));
+
+        server.start(config.bindAddress(), config.port(), new NodePacketHandler(
+                config, serviceManager, services, groups, wrappers, events));
+
+        LOGGER.info("Services connect back to {}:{}", config.connectAddress(), config.port());
+        LOGGER.info("Wrapper secret: {}", config.secret());
+        LOGGER.info("Waiting for a wrapper to connect. Type 'help' for commands.");
+
+        scheduler.scheduleWithFixedDelay(
+                new ProvisioningTask(groups, services, serviceManager, wrappers),
+                2, 1, TimeUnit.SECONDS);
+
+        Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "sirius-shutdown"));
+
+        // Blocks this thread until the console exits.
+        console.run(this::shutdown);
+    }
+
+    public void shutdown() {
+        if (!shuttingDown.compareAndSet(false, true)) {
+            return;
+        }
+
+        LOGGER.info("Shutting down...");
+        scheduler.shutdownNow();
+
+        Collection<ServiceInfo> running = services.all();
+        if (!running.isEmpty()) {
+            LOGGER.info("Stopping {} service(s), waiting up to {}s", running.size(), SHUTDOWN_GRACE_SECONDS);
+            running.forEach(service -> serviceManager.stop(service.uniqueId(), false));
+
+            long deadline = System.currentTimeMillis() + SHUTDOWN_GRACE_SECONDS * 1000L;
+            while (services.size() > 0 && System.currentTimeMillis() < deadline) {
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException exception) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+            if (services.size() > 0) {
+                LOGGER.warn("{} service(s) did not stop in time", services.size());
+            }
+        }
+
+        server.close();
+        if (console != null) {
+            console.close();
+        }
+        LOGGER.info("Goodbye.");
+    }
+
+    private void registerCommands() {
+        commands.register(new HelpCommand(commands));
+        commands.register(new ServicesCommand(services));
+        commands.register(new GroupsCommand(groups, services));
+        commands.register(new StartCommand(groups, serviceManager));
+        commands.register(new StopCommand(services, serviceManager));
+        commands.register(new ExecuteCommand(services, serviceManager));
+        commands.register(new InfoCommand(config, services, wrappers));
+        commands.register(new ShutdownCommand(this));
+    }
+
+    private void printBanner() {
+        CloudLogger.raw("");
+        CloudLogger.raw("   ____  _      _           ____ _                 _ ");
+        CloudLogger.raw("  / ___|(_)_ __(_)_   _ ___ / ___| | ___  _   _  __| |");
+        CloudLogger.raw("  \\___ \\| | '__| | | | / __| |   | |/ _ \\| | | |/ _` |");
+        CloudLogger.raw("   ___) | | |  | | |_| \\__ \\ |___| | (_) | |_| | (_| |");
+        CloudLogger.raw("  |____/|_|_|  |_|\\__,_|___/\\____|_|\\___/ \\__,_|\\__,_|");
+        CloudLogger.raw("");
+        CloudLogger.raw("  node '" + config.nodeName() + "'  |  " + Platform.describe());
+        CloudLogger.raw("");
+    }
+
+    public Path workingDirectory() {
+        return workingDirectory;
+    }
+
+    public NodeConfig config() {
+        return config;
+    }
+
+    public EventManager events() {
+        return events;
+    }
+
+    public ServiceRegistry services() {
+        return services;
+    }
+
+    public WrapperRegistry wrappers() {
+        return wrappers;
+    }
+
+    public GroupRegistry groups() {
+        return groups;
+    }
+
+    public ServiceManager serviceManager() {
+        return serviceManager;
+    }
+
+    public CommandManager commands() {
+        return commands;
+    }
+}

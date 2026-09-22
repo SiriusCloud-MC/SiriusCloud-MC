@@ -1,0 +1,7 @@
+name: SiriusCloud
+version: '${version}'
+main: dev.sirius.cloud.plugin.paper.SiriusCloudPlugin
+api-version: '1.21'
+author: Sirius
+description: Connects this server to its SiriusCloud node.
+load: POSTWORLD
