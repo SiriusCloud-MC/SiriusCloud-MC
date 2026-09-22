@@ -281,6 +281,28 @@ the same state as one that was there from the beginning.
   lobby with a message, or disconnected with a reason if none is available,
   rather than left on a dead connection until they time out.
 
+### Slots follow the servers
+
+`show-max-players` in `velocity.toml` is a fixed number, which is wrong the
+moment the cloud scales: start a second lobby and the proxy still advertises
+the old figure. The proxy answers each server-list ping with the sum of what
+its registered servers actually hold, so the slot count tracks capacity with
+nothing to edit:
+
+```
+1 lobby  (50 slots each)  ->  max=50
+2 lobbies                 ->  max=100
+back to 1 lobby           ->  max=50
+```
+
+The total is recomputed per ping rather than cached — it is derived from a map
+that changes underneath, and a stale cached total is the exact bug this
+replaces. With nothing registered it falls back to the configured figure,
+since a server list reading `0/0` looks broken rather than empty.
+
+Services report their occupancy and capacity back to the node too, so
+`services` shows real numbers instead of `0/N` for everything.
+
 ### Player forwarding is secured
 
 Backends run `online-mode=false` so the proxy can authenticate on their behalf.

@@ -32,6 +32,7 @@ import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceAvailabilityPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceCrashReportPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceListRequestPacket;
+import dev.sirius.cloud.protocol.packet.impl.ServicePlayerUpdatePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceListResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceReadyPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStartRequestPacket;
@@ -103,6 +104,23 @@ public final class NodePacketHandler implements PacketHandler {
                 service.maxPlayers(ready.maxPlayers());
                 serviceManager.transition(service, ServiceState.RUNNING);
                 LOGGER.info("{} is ready on port {} ({})", service.name(), service.port(), ready.version());
+            });
+
+        } else if (packet instanceof ServicePlayerUpdatePacket update) {
+            services.byId(update.serviceId()).ifPresent(service -> {
+                service.playerCount(update.playerCount());
+
+                boolean capacityChanged = service.maxPlayers() != update.maxPlayers();
+                service.maxPlayers(update.maxPlayers());
+
+                // A backend whose slot count moved changes what every proxy
+                // should be advertising, so they are told again.
+                if (capacityChanged
+                        && service.type() == ServiceType.SERVER
+                        && service.state() == ServiceState.RUNNING) {
+                    serviceChannels.broadcastToProxies(services,
+                            new ServiceAvailabilityPacket(service, true));
+                }
             });
 
         } else if (packet instanceof ConsoleLinePacket line) {

@@ -13,6 +13,7 @@ import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceAvailabilityPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceCrashReportPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceListRequestPacket;
+import dev.sirius.cloud.protocol.packet.impl.ServicePlayerUpdatePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceListResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceReadyPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStartPacket;
@@ -95,6 +96,7 @@ public final class PacketRegistry {
                 .register(0x22, ConsoleLinePacket.class, ConsoleLinePacket::new)
                 .register(0x23, ConsoleHistoryPacket.class, ConsoleHistoryPacket::new)
                 .register(0x24, ServiceCrashReportPacket.class, ServiceCrashReportPacket::new)
+                .register(0x25, ServicePlayerUpdatePacket.class, ServicePlayerUpdatePacket::new)
 
                 // 0x30-0x3F — driver queries
                 .register(0x30, ServiceListRequestPacket.class, ServiceListRequestPacket::new)

@@ -6,12 +6,14 @@ import com.velocitypowered.api.command.SimpleCommand;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.player.PlayerChooseInitialServerEvent;
 import com.velocitypowered.api.event.proxy.ProxyInitializeEvent;
+import com.velocitypowered.api.event.proxy.ProxyPingEvent;
 import com.velocitypowered.api.event.proxy.ProxyShutdownEvent;
 import com.velocitypowered.api.plugin.Plugin;
 import com.velocitypowered.api.proxy.Player;
 import com.velocitypowered.api.proxy.ProxyServer;
 import com.velocitypowered.api.proxy.server.RegisteredServer;
 import com.velocitypowered.api.proxy.server.ServerInfo;
+import com.velocitypowered.api.proxy.server.ServerPing;
 import dev.sirius.cloud.api.driver.CloudDriver;
 import dev.sirius.cloud.api.logging.CloudLogger;
 import dev.sirius.cloud.api.platform.Platform;
@@ -28,6 +30,7 @@ import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceAvailabilityPacket;
+import dev.sirius.cloud.protocol.packet.impl.ServicePlayerUpdatePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceReadyPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStateUpdatePacket;
 import net.kyori.adventure.text.Component;
@@ -73,10 +76,20 @@ public final class SiriusCloudVelocityPlugin {
     private NetworkClient client;
 
     /** Backends the node has told us about, by service id. */
-    private final Map<UUID, ServerInfo> registered = new ConcurrentHashMap<>();
+    private final Map<UUID, Backend> backends = new ConcurrentHashMap<>();
 
-    /** Which of those may receive players on join or via {@code /hub}. */
-    private final Map<UUID, Boolean> fallbacks = new ConcurrentHashMap<>();
+    /** {@code show-max-players} from velocity.toml, used when nothing is registered. */
+    private volatile int configuredMaxPlayers = 0;
+
+    /**
+     * A registered backend.
+     *
+     * @param info       what Velocity needs to reach it
+     * @param fallback   whether players may be sent here on join or via /hub
+     * @param maxPlayers its own slot count, as the server itself reported it
+     */
+    private record Backend(ServerInfo info, boolean fallback, int maxPlayers) {
+    }
 
     private final AtomicBoolean authenticated = new AtomicBoolean();
     private final AtomicBoolean readySent = new AtomicBoolean();
@@ -112,6 +125,8 @@ public final class SiriusCloudVelocityPlugin {
         client.connect(connection.nodeHost(), connection.nodePort(), new ProxyPacketHandler());
 
         CloudDriver.bind(new RemoteCloudDriver("SERVICE", client));
+
+        configuredMaxPlayers = proxy.getConfiguration().getShowMaxPlayers();
 
         proxy.getScheduler().buildTask(this, this::heartbeat)
                 .repeat(HEARTBEAT_SECONDS, TimeUnit.SECONDS)
@@ -151,12 +166,43 @@ public final class SiriusCloudVelocityPlugin {
      * takes some of the load instead of being ignored until chance finds it.
      */
     private Optional<RegisteredServer> pickFallback() {
-        return registered.entrySet().stream()
-                .filter(entry -> Boolean.TRUE.equals(fallbacks.get(entry.getKey())))
-                .map(entry -> proxy.getServer(entry.getValue().getName()))
+        return backends.values().stream()
+                .filter(Backend::fallback)
+                .map(backend -> proxy.getServer(backend.info().getName()))
                 .filter(Optional::isPresent)
                 .map(Optional::get)
                 .min(Comparator.comparingInt(server -> server.getPlayersConnected().size()));
+    }
+
+    // ------------------------------------------------------------- capacity
+
+    /**
+     * Advertises the cloud's real capacity in the server list.
+     *
+     * <p>{@code show-max-players} in velocity.toml is a fixed number, which is
+     * wrong the moment the cloud scales: start a second lobby and the proxy
+     * still claims the old figure. The ping is answered with the sum of what
+     * the registered servers actually hold, so the slot count tracks the
+     * servers without anyone editing a config.
+     *
+     * <p>Recomputed per ping rather than cached, because it is derived from a
+     * map that changes underneath us and a stale cached total is exactly the
+     * bug this replaces.
+     */
+    @Subscribe
+    public void onProxyPing(ProxyPingEvent event) {
+        int capacity = advertisedCapacity();
+        ServerPing ping = event.getPing();
+        event.setPing(ping.asBuilder().maximumPlayers(capacity).build());
+    }
+
+    private int advertisedCapacity() {
+        int total = backends.values().stream().mapToInt(Backend::maxPlayers).sum();
+
+        // With nothing registered the honest total is zero, but a server list
+        // reading "0/0" looks broken rather than empty. Fall back to the
+        // configured figure until the first server arrives.
+        return total > 0 ? total : configuredMaxPlayers;
     }
 
     private final class HubCommand implements SimpleCommand {
@@ -202,23 +248,26 @@ public final class SiriusCloudVelocityPlugin {
                     .ifPresent(existing -> proxy.unregisterServer(existing.getServerInfo()));
 
             proxy.registerServer(info);
-            registered.put(service.uniqueId(), info);
-            fallbacks.put(service.uniqueId(), service.fallback());
+            backends.put(service.uniqueId(),
+                    new Backend(info, service.fallback(), service.maxPlayers()));
 
-            logger.info("Registered {} at {}:{}{}",
-                    service.name(), service.host(), service.port(),
-                    service.fallback() ? " (lobby)" : "");
+            logger.info("Registered {} at {}:{} ({} slots{}) - cloud now advertises {}",
+                    service.name(), service.host(), service.port(), service.maxPlayers(),
+                    service.fallback() ? ", lobby" : "", advertisedCapacity());
+            reportPlayers();
             return;
         }
 
-        ServerInfo info = registered.remove(service.uniqueId());
-        fallbacks.remove(service.uniqueId());
-        if (info == null) {
+        Backend removed = backends.remove(service.uniqueId());
+        if (removed == null) {
             return;
         }
+        ServerInfo info = removed.info();
 
         proxy.unregisterServer(info);
-        logger.info("Unregistered {}", service.name());
+        logger.info("Unregistered {} - cloud now advertises {}",
+                service.name(), advertisedCapacity());
+        reportPlayers();
 
         // Players still on it would otherwise sit on a dead connection until
         // they time out.
@@ -245,9 +294,18 @@ public final class SiriusCloudVelocityPlugin {
 
     private void heartbeat() {
         if (client != null && client.isConnected()) {
-            client.send(new HeartbeatPacket(
-                    System.currentTimeMillis(), 0, proxy.getPlayerCount()));
+            client.send(new HeartbeatPacket(System.currentTimeMillis(), 0, proxy.getPlayerCount()));
+            reportPlayers();
         }
+    }
+
+    /** Keeps the node's view of this proxy's occupancy and capacity current. */
+    private void reportPlayers() {
+        if (client == null || connection == null || !client.isConnected()) {
+            return;
+        }
+        client.send(new ServicePlayerUpdatePacket(
+                connection.serviceId(), proxy.getPlayerCount(), advertisedCapacity()));
     }
 
     private void sendReadyIfPossible() {
@@ -256,7 +314,7 @@ public final class SiriusCloudVelocityPlugin {
         }
         client.send(new ServiceReadyPacket(
                 connection.serviceId(),
-                proxy.getConfiguration().getShowMaxPlayers(),
+                advertisedCapacity(),
                 "Velocity"));
         logger.info("Reported ready to the node.");
     }

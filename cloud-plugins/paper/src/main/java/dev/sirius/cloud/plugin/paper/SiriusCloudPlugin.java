@@ -14,6 +14,7 @@ import dev.sirius.cloud.protocol.packet.PacketRegistry;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
+import dev.sirius.cloud.protocol.packet.impl.ServicePlayerUpdatePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceReadyPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStateUpdatePacket;
 import org.bukkit.Bukkit;
@@ -123,6 +124,11 @@ public final class SiriusCloudPlugin extends JavaPlugin implements Listener {
     private void heartbeat() {
         if (client != null && client.isConnected()) {
             client.send(new HeartbeatPacket(System.currentTimeMillis(), 0, Bukkit.getOnlinePlayers().size()));
+
+            // Without this the node's 'services' listing reports 0 players for
+            // every service, forever.
+            client.send(new ServicePlayerUpdatePacket(
+                    connection.serviceId(), Bukkit.getOnlinePlayers().size(), Bukkit.getMaxPlayers()));
         }
     }
 
