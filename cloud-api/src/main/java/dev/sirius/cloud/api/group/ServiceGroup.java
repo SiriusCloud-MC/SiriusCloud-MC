@@ -20,8 +20,18 @@ public final class ServiceGroup {
     private int maxServiceCount = 5;
     private int maxPlayers = 50;
 
-    /** Heap size in megabytes handed to the spawned JVM. */
+    /** Maximum heap in megabytes ({@code -Xmx}), and what the node budgets for. */
     private int memory = 1024;
+
+    /**
+     * Initial heap in megabytes ({@code -Xms}). Zero means "same as {@link #memory}".
+     *
+     * <p>Equal minimum and maximum is the usual advice for Minecraft: it stops
+     * the heap growing during play, which is when a resize hurts most. Kept
+     * configurable because packing many small servers onto one machine is the
+     * case where starting low genuinely helps.
+     */
+    private int minMemory = 0;
 
     private List<String> jvmArguments = new ArrayList<>();
     private List<String> templates = new ArrayList<>();
@@ -104,6 +114,15 @@ public final class ServiceGroup {
         this.memory = memory;
     }
 
+    /** Initial heap, falling back to {@link #memory()} when unset or invalid. */
+    public int minMemory() {
+        return minMemory <= 0 || minMemory > memory ? memory : minMemory;
+    }
+
+    public void minMemory(int minMemory) {
+        this.minMemory = minMemory;
+    }
+
     public List<String> jvmArguments() {
         return jvmArguments == null ? List.of() : jvmArguments;
     }
@@ -126,6 +145,14 @@ public final class ServiceGroup {
 
     public int startPort() {
         return startPort;
+    }
+
+    public void startPort(int startPort) {
+        this.startPort = startPort;
+    }
+
+    public void staticService(boolean staticService) {
+        this.staticService = staticService;
     }
 
     public String version() {

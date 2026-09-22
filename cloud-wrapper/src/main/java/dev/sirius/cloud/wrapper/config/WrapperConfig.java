@@ -42,10 +42,49 @@ public final class WrapperConfig {
             "-Dcom.mojang.eula.agree=true",
     };
 
+    /** Whether interactive setup has run. See NodeConfig for why this is tracked. */
+    private boolean setupCompleted = false;
+
     private boolean debug = false;
+
+    public boolean setupCompleted() {
+        return setupCompleted;
+    }
+
+    public void setupCompleted(boolean setupCompleted) {
+        this.setupCompleted = setupCompleted;
+    }
 
     public String name() {
         return name;
+    }
+
+    public void name(String name) {
+        this.name = name;
+    }
+
+    public void nodeHost(String nodeHost) {
+        this.nodeHost = nodeHost;
+    }
+
+    public void nodePort(int nodePort) {
+        this.nodePort = nodePort;
+    }
+
+    public void secret(String secret) {
+        this.secret = secret;
+    }
+
+    public void maxMemory(int maxMemory) {
+        this.maxMemory = maxMemory;
+    }
+
+    public void serviceJavaVersion(int serviceJavaVersion) {
+        this.serviceJavaVersion = serviceJavaVersion;
+    }
+
+    public void javaExecutable(String javaExecutable) {
+        this.javaExecutable = javaExecutable;
     }
 
     public String nodeHost() {

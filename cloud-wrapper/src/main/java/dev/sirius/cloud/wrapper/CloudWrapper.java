@@ -4,6 +4,7 @@ import dev.sirius.cloud.api.driver.CloudDriver;
 import dev.sirius.cloud.api.logging.CloudLogger;
 import dev.sirius.cloud.api.platform.Platform;
 import dev.sirius.cloud.driver.RemoteCloudDriver;
+import dev.sirius.cloud.driver.config.DirectoryLock;
 import dev.sirius.cloud.driver.config.JsonConfig;
 import dev.sirius.cloud.driver.paper.PaperVersionCatalog;
 import dev.sirius.cloud.protocol.connection.NetworkClient;
@@ -19,6 +20,8 @@ import dev.sirius.cloud.wrapper.java.JavaRuntime;
 import dev.sirius.cloud.wrapper.java.JavaRuntimeResolver;
 import dev.sirius.cloud.wrapper.network.WrapperPacketHandler;
 import dev.sirius.cloud.wrapper.process.ServiceProcessManager;
+import dev.sirius.cloud.wrapper.setup.Prompter;
+import dev.sirius.cloud.wrapper.setup.WrapperSetup;
 import dev.sirius.cloud.wrapper.template.TemplateManager;
 
 import java.io.IOException;
@@ -58,6 +61,8 @@ public final class CloudWrapper {
         return thread;
     });
 
+    private DirectoryLock directoryLock;
+
     private final CountDownLatch shutdownLatch = new CountDownLatch(1);
     private final AtomicBoolean shuttingDown = new AtomicBoolean();
 
@@ -93,11 +98,24 @@ public final class CloudWrapper {
     public void start() throws Exception {
         LOGGER.info("SiriusCloud wrapper '{}' on {}", config.name(), Platform.describe());
 
+        // Before anything connects or logs from another thread, so the
+        // questions are not interleaved with output.
+        if (!config.setupCompleted()) {
+            new WrapperSetup(new Prompter(), config,
+                    workingDirectory.resolve("config.json"), javaRuntimes).run();
+            config.setupCompleted(true);
+            JsonConfig.save(workingDirectory.resolve("config.json"), config);
+        }
+
         if (config.secret().isBlank()) {
             LOGGER.error("No secret configured.");
-            LOGGER.error("Copy 'secret' from node/config.json into wrapper/config.json and restart.");
+            LOGGER.error("Copy the 'Wrapper secret' line from the node's console into wrapper/config.json.");
             return;
         }
+
+        // Before cleanStaleDirectories(), which is precisely the operation that
+        // would destroy another wrapper's running services.
+        directoryLock = DirectoryLock.acquire(workingDirectory.resolve(".lock"), "wrapper");
 
         processes.cleanStaleDirectories();
         reportServiceRuntime();
@@ -194,6 +212,11 @@ public final class CloudWrapper {
         processes.stopAll();
 
         client.close();
+
+        if (directoryLock != null) {
+            directoryLock.close();
+        }
+
         shutdownLatch.countDown();
         LOGGER.info("Goodbye.");
     }

@@ -211,7 +211,7 @@ public final class ServiceProcess {
         List<String> command = new ArrayList<>();
 
         command.add(javaExecutable);
-        command.add("-Xms" + info.memory() + "M");
+        command.add("-Xms" + group.minMemory() + "M");
         command.add("-Xmx" + info.memory() + "M");
         command.addAll(List.of(config.defaultJvmArguments()));
         command.addAll(group.jvmArguments());

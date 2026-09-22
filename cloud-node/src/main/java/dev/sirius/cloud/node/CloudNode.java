@@ -21,6 +21,7 @@ import dev.sirius.cloud.node.command.commands.ShutdownCommand;
 import dev.sirius.cloud.node.command.commands.StartCommand;
 import dev.sirius.cloud.node.command.commands.StopCommand;
 import dev.sirius.cloud.node.command.commands.VersionsCommand;
+import dev.sirius.cloud.driver.config.DirectoryLock;
 import dev.sirius.cloud.driver.config.JsonConfig;
 import dev.sirius.cloud.node.config.NodeConfig;
 import dev.sirius.cloud.node.console.NodeConsole;
@@ -76,6 +77,7 @@ public final class CloudNode {
     private final AtomicBoolean shuttingDown = new AtomicBoolean();
 
     private NodeConsole console;
+    private DirectoryLock directoryLock;
 
     public CloudNode(Path workingDirectory) throws IOException {
         this.workingDirectory = workingDirectory;
@@ -98,23 +100,27 @@ public final class CloudNode {
     }
 
     public void start() throws Exception {
+        // Two nodes sharing one directory would fight over config.json and
+        // groups/, and the second would fail to bind the port anyway — with a
+        // stack trace instead of an explanation.
+        directoryLock = DirectoryLock.acquire(workingDirectory.resolve(".lock"), "node");
+
         console = new NodeConsole(commands, workingDirectory.resolve("local").resolve("console_history"));
         printBanner();
 
         groups.load();
 
-        FirstRunSetup setup = new FirstRunSetup(console, groups, config);
+        Path configFile = workingDirectory.resolve("config.json");
+        FirstRunSetup setup = new FirstRunSetup(console, groups, config, configFile);
         registerCommands(setup);
 
         // Offered once, then remembered either way. Tracked in the config
         // rather than inferred from "are there groups", so declining is not
         // re-asked on every single start.
         if (!config.setupCompleted()) {
-            if (groups.isEmpty()) {
-                setup.run(true);
-            }
+            setup.runFirstRun();
             config.setupCompleted(true);
-            JsonConfig.save(workingDirectory.resolve("config.json"), config);
+            JsonConfig.save(configFile, config);
         }
 
         CloudDriver.bind(new LocalCloudDriver(serviceManager, services, groups, events));
@@ -186,6 +192,9 @@ public final class CloudNode {
         server.close();
         if (console != null) {
             console.close();
+        }
+        if (directoryLock != null) {
+            directoryLock.close();
         }
         LOGGER.info("Goodbye.");
     }

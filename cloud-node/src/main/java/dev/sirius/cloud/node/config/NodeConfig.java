@@ -64,6 +64,30 @@ public final class NodeConfig {
         return nodeName;
     }
 
+    public void nodeName(String nodeName) {
+        this.nodeName = nodeName;
+    }
+
+    public void bindAddress(String bindAddress) {
+        this.bindAddress = bindAddress;
+    }
+
+    public void connectAddress(String connectAddress) {
+        this.connectAddress = connectAddress;
+    }
+
+    public void port(int port) {
+        this.port = port;
+    }
+
+    public void maxMemory(int maxMemory) {
+        this.maxMemory = maxMemory;
+    }
+
+    public void minimumPaperVersion(String minimumPaperVersion) {
+        this.minimumPaperVersion = minimumPaperVersion;
+    }
+
     public String bindAddress() {
         return bindAddress;
     }

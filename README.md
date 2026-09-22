@@ -95,39 +95,77 @@ build/dist/
 cd build/dist && ./start-node.sh
 ```
 
-On first run it writes `node/config.json` with a generated `secret`, prints it,
-and asks whether you want a first group:
+First run asks you everything it needs:
 
 ```
-── First-time setup ──
-  This node has no groups yet. A group is a template that
-  servers are started from - a 'Lobby' group gives you lobby servers.
+── Node ──
+  Name for this node [node-1]: test-node
 
+  This machine has 31194MB (30.5GB) of RAM.
+  The node will refuse to start services beyond this budget.
+  How much RAM may this node use for services, in MB [28672]: 3072
+
+  Port wrappers and services connect to [1420]: 1420
+  Address to listen on (0.0.0.0 accepts remote wrappers) [0.0.0.0]:
+  Address wrappers should dial back (this machine's IP if remote) [127.0.0.1]:
+  Oldest Paper version to list in 'versions' [1.21.1]:
+
+── First group ──
   Create a Lobby group now? [Y/n]: y
   Group name [Lobby]: Lobby
-  Memory per server in MB [1024]: 2048
-  Servers to keep online [1]: 1
-  Max players per server [50]: 60
-  Minecraft version ('latest' = newest stable) [latest]: latest
-
-[INFO] [Setup] Created group 'Lobby' (2048MB, keeping 1 online, Paper latest)
-[INFO] [Setup] Lobby-1 will start as soon as a wrapper connects.
+  Maximum RAM per server, in MB [1024]: 2048
+  Starting RAM per server, in MB (same as maximum is usual) [2048]:
+  Servers to keep online at all times [1]: 2
+  Maximum servers of this group [6]: 8
+  Max players per server [50]: 80
+  Minecraft version ('latest' = newest stable) [latest]:
+  First port for these servers [41000]:
+  Keep each server's files between restarts (static)? [y/N]: n
 ```
 
-Every question has a default, so pressing Enter through it is fine. Declining
-is remembered rather than re-asked on every start — run `setup` whenever you
-want a group. With no terminal to ask on (systemd, a container without `-t`,
-piped stdin) it creates a default `Lobby` instead of hanging on a prompt that
-can never be answered.
+Memory defaults are read from the machine rather than guessed, and the port
+suggestion avoids colliding with groups you already have. It warns if the
+servers you asked for would exceed the budget you just set — otherwise that is
+discovered later as a group that accepts its configuration and then refuses to
+start.
 
-**2. Give the wrapper that secret.** Start it once to generate its config, then
-copy `secret` from `node/config.json` into `wrapper/config.json`.
+Everything is re-runnable: `setup` creates another group, `setup node` revisits
+the node settings. Declining is remembered rather than re-asked on every start.
+With no terminal to ask on (systemd, a container without `-t`, piped stdin) it
+uses defaults instead of hanging on a prompt that can never be answered.
 
-**3. Start the wrapper.**
+**2. Start the wrapper.** It asks its own questions, including the secret the
+node just printed — no hand-editing JSON.
 
 ```bash
 cd build/dist && ./start-wrapper.sh
 ```
+
+```
+── Wrapper setup ──
+  Name for this wrapper [wrapper-1]: wrapper-a
+
+  The node prints its address and secret when it starts.
+  Node address [127.0.0.1]:
+  Node port [1420]:
+  Node secret: f61a2e1e-a302-4460-8dd3-b62cc5a35c2d
+
+  This machine has 31194MB (30.5GB) of RAM.
+  How much may this machine use for servers, in MB [28672]: 3072
+
+  JVMs found: Java 21, Java 25
+  Minecraft 26.x and newer needs Java 25 or above.
+  Minimum Java version for servers [25]:
+  Servers will run on Java 25 (25.0.4.1) at /usr/lib/jvm/java-25-openjdk/bin/java.
+```
+
+It lists the JVMs actually installed, so the Java question is a choice rather
+than a guess, and offers to point at one by path if none qualify.
+
+A node and a wrapper each take a lock on their working directory. Two wrappers
+sharing one would be genuinely destructive: the second clears `local/running/`
+as part of its stale-directory cleanup, deleting the files of servers the first
+still has running.
 
 **4. Watch it work.** The node's provisioning loop sees `Lobby` below its
 `minServiceCount` and starts one automatically. Or drive it by hand:
@@ -142,7 +180,7 @@ sirius@node> stop Lobby-1
 | Command | What it does |
 |---|---|
 | `help` | Lists every command |
-| `setup` | Creates a group interactively |
+| `setup [group\|node]` | Configures a group, or the node itself, by question |
 | `services` / `ls` | Every known service with state, address, uptime |
 | `groups` | Configured groups and how many of each are online |
 | `start <group> [count]` | Starts services |

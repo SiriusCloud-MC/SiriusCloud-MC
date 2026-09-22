@@ -120,7 +120,17 @@ public final class PaperMcJarProvider implements JarProvider {
         }
     }
 
-    /** Fill API: an array of build objects, newest last. */
+    /**
+     * Fill API: an array of build objects.
+     *
+     * <p>The highest build number wins rather than whichever end of the array
+     * it sits at. Relying on position got this wrong in both directions: the
+     * array is ordered newest-first, so reading from the end selected the
+     * <em>oldest</em> build every time and quietly shipped servers dozens of
+     * builds behind. Build numbers are integers, so comparing them is safe —
+     * unlike version strings, where {@code PaperVersionCatalog} has to trust
+     * the API's ordering precisely because they cannot be compared.
+     */
     private BuildRef fetchFromV3(String version, Integer requested) throws IOException, InterruptedException {
         JsonElement body = get(String.format(V3_BUILDS, version));
 
@@ -131,10 +141,16 @@ public final class PaperMcJarProvider implements JarProvider {
             throw new IOException("No builds listed for " + version);
         }
 
-        for (int i = builds.size() - 1; i >= 0; i--) {
-            JsonObject entry = builds.get(i).getAsJsonObject();
+        BuildRef best = null;
+
+        for (JsonElement element : builds) {
+            JsonObject entry = element.getAsJsonObject();
+
             int number = entry.has("id") ? entry.get("id").getAsInt() : entry.get("build").getAsInt();
             if (requested != null && number != requested) {
+                continue;
+            }
+            if (best != null && number <= best.build) {
                 continue;
             }
 
@@ -160,10 +176,15 @@ public final class PaperMcJarProvider implements JarProvider {
                 sha256 = download.getAsJsonObject("checksums").get("sha256").getAsString();
             }
 
-            return new BuildRef(number, download.get("url").getAsString(), sha256);
+            best = new BuildRef(number, download.get("url").getAsString(), sha256);
         }
 
-        throw new IOException("Build " + requested + " not found for " + version);
+        if (best == null) {
+            throw new IOException(requested == null
+                    ? "No usable build listed for " + version
+                    : "Build " + requested + " not found for " + version);
+        }
+        return best;
     }
 
     /** Legacy v2 API: build numbers only, download URL assembled by convention. */
@@ -174,7 +195,14 @@ public final class PaperMcJarProvider implements JarProvider {
             throw new IOException("No builds listed for " + version);
         }
 
-        int number = requested != null ? requested : builds.get(builds.size() - 1).getAsInt();
+        // Highest, not last, for the same reason as above.
+        int number = requested;
+        if (requested == null) {
+            number = Integer.MIN_VALUE;
+            for (JsonElement element : builds) {
+                number = Math.max(number, element.getAsInt());
+            }
+        }
         String fileName = "paper-" + version + "-" + number + ".jar";
         return new BuildRef(number, String.format(V2_DOWNLOAD, version, number, fileName), null);
     }

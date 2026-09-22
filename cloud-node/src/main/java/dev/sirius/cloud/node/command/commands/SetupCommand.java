@@ -5,8 +5,9 @@ import dev.sirius.cloud.node.command.Command;
 import dev.sirius.cloud.node.setup.FirstRunSetup;
 
 import java.io.IOException;
+import java.util.List;
 
-/** Re-runs the interactive group setup. */
+/** Re-runs the interactive configuration. */
 public final class SetupCommand implements Command {
 
     private static final CloudLogger LOGGER = CloudLogger.of("Setup");
@@ -23,16 +24,32 @@ public final class SetupCommand implements Command {
     }
 
     @Override
+    public String usage() {
+        return "setup [group|node]";
+    }
+
+    @Override
     public String description() {
-        return "Creates a group interactively";
+        return "Configures a group, or the node itself, by question";
     }
 
     @Override
     public void execute(String[] args) {
+        String target = args.length > 0 ? args[0].toLowerCase(java.util.Locale.ROOT) : "group";
+
         try {
-            setup.run(false);
+            switch (target) {
+                case "node" -> setup.configureNode(false);
+                case "group" -> setup.createGroup(false);
+                default -> LOGGER.warn("Usage: {}", usage());
+            }
         } catch (IOException exception) {
-            LOGGER.error("Could not save the group", exception);
+            LOGGER.error("Could not save the configuration", exception);
         }
+    }
+
+    @Override
+    public List<String> complete(String[] args) {
+        return args.length <= 1 ? List.of("group", "node") : List.of();
     }
 }
