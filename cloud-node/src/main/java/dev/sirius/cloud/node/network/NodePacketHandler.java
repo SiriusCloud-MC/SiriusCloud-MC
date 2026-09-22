@@ -27,6 +27,7 @@ import dev.sirius.cloud.protocol.packet.impl.GroupListResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
+import dev.sirius.cloud.protocol.packet.impl.ServiceCrashReportPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceListRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceListResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceReadyPacket;
@@ -104,6 +105,17 @@ public final class NodePacketHandler implements PacketHandler {
 
         } else if (packet instanceof ConsoleHistoryPacket history) {
             console.printServiceBacklog(history.serviceId(), history.lines());
+
+        } else if (packet instanceof ServiceCrashReportPacket crash) {
+            // Printed unconditionally, unlike ordinary console output: this is
+            // the only place the reason for a failed start ever surfaces.
+            LOGGER.error("{} exited unexpectedly with code {}. Last output:",
+                    crash.serviceName(), crash.exitCode());
+            if (crash.lastLines().isEmpty()) {
+                LOGGER.error("  (the service produced no output)");
+            } else {
+                crash.lastLines().forEach(line -> LOGGER.error("  | {}", line));
+            }
 
         } else if (packet instanceof ServiceListRequestPacket request) {
             List<ServiceInfo> result = request.groupFilter() == null

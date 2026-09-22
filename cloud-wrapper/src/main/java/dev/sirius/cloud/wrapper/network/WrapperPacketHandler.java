@@ -26,13 +26,16 @@ public final class WrapperPacketHandler implements PacketHandler {
     private final WrapperConfig config;
     private final ServiceProcessManager processes;
     private final Consumer<Boolean> connectionStateSink;
+    private final Runnable onAuthenticationRejected;
 
     public WrapperPacketHandler(WrapperConfig config,
                                 ServiceProcessManager processes,
-                                Consumer<Boolean> connectionStateSink) {
+                                Consumer<Boolean> connectionStateSink,
+                                Runnable onAuthenticationRejected) {
         this.config = config;
         this.processes = processes;
         this.connectionStateSink = connectionStateSink;
+        this.onAuthenticationRejected = onAuthenticationRejected;
     }
 
     @Override
@@ -57,6 +60,9 @@ public final class WrapperPacketHandler implements PacketHandler {
                 LOGGER.error("The node rejected this wrapper: {}", response.message());
                 LOGGER.error("Check that 'secret' in config.json matches the node's.");
                 channel.close();
+                // Reconnecting will be rejected identically every three seconds
+                // forever: a wrong secret does not become right on its own.
+                onAuthenticationRejected.run();
             }
             return;
         }

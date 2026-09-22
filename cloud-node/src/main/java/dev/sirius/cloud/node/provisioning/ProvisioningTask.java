@@ -25,15 +25,18 @@ public final class ProvisioningTask implements Runnable {
     private final ServiceRegistry services;
     private final ServiceManager serviceManager;
     private final WrapperRegistry wrappers;
+    private final GroupBackoff backoff;
 
     public ProvisioningTask(GroupRegistry groups,
                             ServiceRegistry services,
                             ServiceManager serviceManager,
-                            WrapperRegistry wrappers) {
+                            WrapperRegistry wrappers,
+                            GroupBackoff backoff) {
         this.groups = groups;
         this.services = services;
         this.serviceManager = serviceManager;
         this.wrappers = wrappers;
+        this.backoff = backoff;
     }
 
     @Override
@@ -50,6 +53,12 @@ public final class ProvisioningTask implements Runnable {
 
             long active = services.activeCount(group.name());
             if (active >= group.minServiceCount()) {
+                continue;
+            }
+
+            // A group that keeps failing is retried on a growing delay rather
+            // than once a second; see GroupBackoff.
+            if (!backoff.ready(group.name())) {
                 continue;
             }
 

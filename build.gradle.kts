@@ -32,9 +32,14 @@ subprojects {
  * Assembles a runnable layout under build/dist that works identically on
  * Linux and Windows. Shell and batch launchers are both generated.
  */
-val dist by tasks.registering(Sync::class) {
+val dist by tasks.registering(Copy::class) {
     group = "distribution"
     description = "Builds a runnable node + wrapper layout into build/dist"
+
+    // Copy, not Sync: the output directory is also where the node and wrapper
+    // keep their state at runtime - config.json with the generated secret, the
+    // template directories, the cached server jars. Sync deletes everything it
+    // did not put there, so rebuilding would silently wipe all of it.
 
     val nodeJar = project(":cloud-node").tasks.named("shadowJar")
     val wrapperJar = project(":cloud-wrapper").tasks.named("shadowJar")

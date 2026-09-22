@@ -4,7 +4,27 @@ A Minecraft server cloud: a control plane that decides what runs where, machine
 agents that run it, and an API that behaves identically whether you call it from
 the node or from inside a running server.
 
-Runs on **Linux and Windows**. Java 21.
+Runs on **Linux and Windows**.
+
+| | Java |
+|---|---|
+| Node and wrapper | **21+** |
+| Minecraft services | **25+** — Minecraft 26.x refuses to start on anything lower |
+
+These are genuinely different requirements, so the wrapper does **not** run
+services on its own JVM. It locates a qualifying JDK on the machine at startup
+and refuses to start services with install instructions if there isn't one,
+rather than spawning servers that exit instantly.
+
+```bash
+sudo pacman -S jdk25-openjdk        # Arch / CachyOS
+sudo apt install openjdk-25-jdk     # Debian / Ubuntu
+```
+
+Windows and macOS: [Temurin 25](https://adoptium.net/temurin/releases/?version=25),
+or `brew install openjdk@25`. Pin `javaExecutable` in `wrapper/config.json` to
+skip detection, or set it per group to run different Minecraft versions on
+different JDKs.
 
 ---
 
@@ -149,6 +169,24 @@ first so you see why it is in the state it is in.
 
 `exec <service> <command>` remains for firing a single command without attaching.
 
+**Crashes are the exception.** A service that dies unasked pushes the tail of
+its console to the node unprompted, and it is printed whether or not anyone is
+attached:
+
+```
+[ERROR] [Network] Lobby-1 exited unexpectedly with code 1. Last output:
+[ERROR] [Network]   | Minecraft 26.1 and newer requires running the server with Java 25 or above.
+```
+
+A service that fails during startup is dead before anyone could attach to it, so
+without this the operator sees `exited with code 1` and the actual reason sits
+in a buffer nobody will ever read.
+
+Groups that keep failing are retried on a growing delay (5s, 15s, 30s, 60s,
+120s) rather than once a second, and say so after three consecutive failures.
+The delay caps instead of giving up, so a transient cause still recovers on its
+own. Reaching `RUNNING` clears the penalty.
+
 ---
 
 ## Templates
@@ -193,6 +231,11 @@ means "in the list", and a version range is an *index* into that list rather
 than a numeric comparison. `minimumPaperVersion` in `node/config.json`
 (default `1.21.1`) trims the `versions` listing that way; `versions --all`
 shows everything, and it never blocks a group from pinning an older release.
+
+`latest` resolves to the newest **stable** release. Release candidates are
+published alongside releases — the newest entry today is a `-rc` build — so
+taking the literal last one would silently put every default group on a
+pre-release. Name one explicitly to opt in.
 
 Groups can also override `javaExecutable`, since a version range spanning
 several Minecraft releases may span their minimum Java versions too.

@@ -87,10 +87,54 @@ public final class PaperVersionCatalog {
         return cached;
     }
 
-    /** The newest published version. */
+    /**
+     * The newest <em>stable</em> published version.
+     *
+     * <p>Release candidates and snapshots are published alongside releases, so
+     * taking the literal last entry means {@code latest} silently puts every
+     * default group on a pre-release build. That is not what anyone means by
+     * "latest" for a server they intend to run. Pre-releases stay available by
+     * naming them explicitly.
+     */
     public String latest() throws IOException {
         List<String> versions = versions();
+
+        for (int i = versions.size() - 1; i >= 0; i--) {
+            if (isStable(versions.get(i))) {
+                return versions.get(i);
+            }
+        }
+
+        // Every published version is a pre-release. Unlikely, but refusing to
+        // resolve at all would be worse than using the newest one there is.
+        String newest = versions.get(versions.size() - 1);
+        LOGGER.warn("No stable Paper version is published; falling back to {}", newest);
+        return newest;
+    }
+
+    /** The newest version of any kind, pre-releases included. */
+    public String newestPublished() throws IOException {
+        List<String> versions = versions();
         return versions.get(versions.size() - 1);
+    }
+
+    /**
+     * Whether a version string looks like a full release.
+     *
+     * <p>Marker-based rather than structural: it needs no knowledge of how
+     * versions are numbered, which is the same reason nothing here compares
+     * them. An unrecognised naming scheme is treated as stable, so a new
+     * release is never wrongly withheld — only a new <em>pre-release</em>
+     * marker would need adding here.
+     */
+    public static boolean isStable(String version) {
+        String value = version.toLowerCase(Locale.ROOT);
+        for (String marker : new String[]{"-rc", "-pre", "-exp", "-alpha", "-beta", "snapshot"}) {
+            if (value.contains(marker)) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /**

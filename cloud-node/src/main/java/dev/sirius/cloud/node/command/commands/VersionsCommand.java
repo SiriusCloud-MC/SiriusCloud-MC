@@ -58,8 +58,12 @@ public final class VersionsCommand implements Command {
                     CloudLogger.raw(builder.toString().stripTrailing());
                 }
 
-                CloudLogger.raw(versions.size() + " version(s). Newest is "
-                        + versions.get(versions.size() - 1) + ".");
+                String newest = catalog.newestPublished();
+                String stable = catalog.latest();
+
+                CloudLogger.raw(versions.size() + " version(s). Newest published: " + newest
+                        + (newest.equals(stable) ? "" : "  (pre-release)"));
+                CloudLogger.raw("'latest' resolves to " + stable + ", the newest stable release.");
                 CloudLogger.raw("Set 'version' in a group's JSON to any of these, or 'latest'.");
 
             } catch (IOException exception) {

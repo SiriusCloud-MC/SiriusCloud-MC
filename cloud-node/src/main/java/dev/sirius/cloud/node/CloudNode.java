@@ -3,6 +3,7 @@ package dev.sirius.cloud.node;
 import dev.sirius.cloud.api.driver.CloudDriver;
 import dev.sirius.cloud.api.event.EventManager;
 import dev.sirius.cloud.api.event.events.ServiceRemovedEvent;
+import dev.sirius.cloud.api.event.events.ServiceStateChangedEvent;
 import dev.sirius.cloud.api.logging.CloudLogger;
 import dev.sirius.cloud.api.platform.Platform;
 import dev.sirius.cloud.api.service.ServiceInfo;
@@ -24,6 +25,7 @@ import dev.sirius.cloud.node.config.NodeConfig;
 import dev.sirius.cloud.node.console.NodeConsole;
 import dev.sirius.cloud.node.group.GroupRegistry;
 import dev.sirius.cloud.node.network.NodePacketHandler;
+import dev.sirius.cloud.node.provisioning.GroupBackoff;
 import dev.sirius.cloud.node.provisioning.ProvisioningTask;
 import dev.sirius.cloud.node.service.ServiceManager;
 import dev.sirius.cloud.node.service.ServiceRegistry;
@@ -61,6 +63,7 @@ public final class CloudNode {
     private final CommandManager commands = new CommandManager();
     private final NetworkServer server = new NetworkServer(PacketRegistry.standard());
     private final PaperVersionCatalog paperVersions = new PaperVersionCatalog();
+    private final GroupBackoff backoff = new GroupBackoff();
 
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "sirius-scheduler");
@@ -108,6 +111,18 @@ public final class CloudNode {
         events.subscribe(ServiceRemovedEvent.class,
                 event -> console.detachIfAttachedTo(event.service().uniqueId()));
 
+        // Provisioning health is derived from lifecycle events rather than
+        // wired into the scheduler, so a group that cannot start backs off
+        // instead of being restarted once a second forever.
+        events.subscribe(ServiceStateChangedEvent.class, event -> {
+            switch (event.current()) {
+                case RUNNING -> backoff.recordSuccess(event.service().groupName());
+                case CRASHED -> backoff.recordFailure(event.service().groupName());
+                default -> {
+                }
+            }
+        });
+
         server.start(config.bindAddress(), config.port(), new NodePacketHandler(
                 config, serviceManager, services, groups, wrappers, events, console));
 
@@ -117,7 +132,7 @@ public final class CloudNode {
         LOGGER.info("Service consoles are hidden until you 'attach <service>'.");
 
         scheduler.scheduleWithFixedDelay(
-                new ProvisioningTask(groups, services, serviceManager, wrappers),
+                new ProvisioningTask(groups, services, serviceManager, wrappers, backoff),
                 2, 1, TimeUnit.SECONDS);
 
         Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "sirius-shutdown"));

@@ -55,13 +55,20 @@ public final class ServiceProcess {
      */
     private static final int CONSOLE_BACKLOG_LINES = 200;
 
+    /** Console lines included in a crash report. Enough for a stack trace, not a log dump. */
+    private static final int CRASH_REPORT_LINES = 20;
+
     private final ServiceInfo info;
     private final ServiceGroup group;
     private final WrapperConfig config;
     private final Path directory;
 
+    /** Resolved before construction; see JavaRuntimeResolver for why it is not the wrapper's own. */
+    private final String javaExecutable;
+
     private final Consumer<String> consoleSink;
     private final BiConsumer<ServiceState, Integer> stateSink;
+    private final BiConsumer<Integer, List<String>> crashSink;
 
     private final AtomicBoolean stopRequested = new AtomicBoolean();
 
@@ -78,14 +85,18 @@ public final class ServiceProcess {
                           ServiceGroup group,
                           WrapperConfig config,
                           Path directory,
+                          String javaExecutable,
                           Consumer<String> consoleSink,
-                          BiConsumer<ServiceState, Integer> stateSink) {
+                          BiConsumer<ServiceState, Integer> stateSink,
+                          BiConsumer<Integer, List<String>> crashSink) {
         this.info = info;
         this.group = group;
         this.config = config;
         this.directory = directory;
+        this.javaExecutable = javaExecutable;
         this.consoleSink = consoleSink;
         this.stateSink = stateSink;
+        this.crashSink = crashSink;
     }
 
     public ServiceInfo info() {
@@ -199,13 +210,7 @@ public final class ServiceProcess {
     private void spawn() throws IOException {
         List<String> command = new ArrayList<>();
 
-        // A group may pin its own JVM, since the supported Minecraft range
-        // spans releases with different minimum Java versions. Otherwise the
-        // wrapper's default, resolved from java.home with the .exe suffix on
-        // Windows: never assume the JVM on PATH is the one we want.
-        command.add(group.javaExecutable().isBlank()
-                ? config.javaExecutable()
-                : group.javaExecutable());
+        command.add(javaExecutable);
         command.add("-Xms" + info.memory() + "M");
         command.add("-Xmx" + info.memory() + "M");
         command.addAll(List.of(config.defaultJvmArguments()));
@@ -230,7 +235,8 @@ public final class ServiceProcess {
         startConsolePump();
         watchForExit();
 
-        LOGGER.info("Spawned {} (pid {}, {}MB)", info.name(), process.pid(), info.memory());
+        LOGGER.info("Spawned {} (pid {}, {}MB, {})",
+                info.name(), process.pid(), info.memory(), javaExecutable);
         stateSink.accept(ServiceState.STARTING, -1);
     }
 
@@ -262,6 +268,13 @@ public final class ServiceProcess {
             LOGGER.info("{} exited with code {}{}",
                     info.name(), exitCode, expected ? "" : " (unexpected)");
 
+            if (!expected) {
+                // Push the tail of the console unasked. Nobody was attached —
+                // a service that fails during startup is dead before anyone
+                // could be — so this is the only chance to say what went wrong.
+                crashSink.accept(exitCode, tailOfConsole());
+            }
+
             stateSink.accept(expected ? ServiceState.STOPPED : ServiceState.CRASHED, exitCode);
             cleanup();
         });
@@ -286,6 +299,14 @@ public final class ServiceProcess {
         if (streaming) {
             consoleSink.accept(line);
         }
+    }
+
+    /** The last few console lines, for a crash report. */
+    private List<String> tailOfConsole() {
+        List<String> backlog = consoleBacklog();
+        return backlog.size() <= CRASH_REPORT_LINES
+                ? backlog
+                : backlog.subList(backlog.size() - CRASH_REPORT_LINES, backlog.size());
     }
 
     /** Snapshot of the backlog, oldest first. */

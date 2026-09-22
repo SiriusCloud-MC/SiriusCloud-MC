@@ -1,7 +1,5 @@
 package dev.sirius.cloud.wrapper.config;
 
-import dev.sirius.cloud.api.platform.Platform;
-
 /** {@code wrapper/config.json}. */
 public final class WrapperConfig {
 
@@ -17,9 +15,22 @@ public final class WrapperConfig {
     private int maxMemory = 4096;
 
     /**
-     * JVM used to run services. Empty means "the one running this wrapper",
-     * resolved through {@link Platform#javaExecutable()} so the {@code .exe}
-     * suffix is handled without the config having to care.
+     * Minimum Java feature version used to run services.
+     *
+     * <p>Deliberately not "whatever JVM the wrapper happens to be running on".
+     * Minecraft's minimum moves with its releases — 26.x refuses to start on
+     * anything below 25 — while the cloud itself targets 21, so the two are
+     * genuinely different requirements. The wrapper locates a qualifying JDK on
+     * this machine at startup and fails with install instructions if there
+     * isn't one, rather than spawning servers that exit instantly.
+     */
+    private int serviceJavaVersion = 25;
+
+    /**
+     * Explicit JVM path for services, bypassing detection entirely.
+     *
+     * <p>Leave empty to auto-detect {@link #serviceJavaVersion}. A group may
+     * override this again for its own services.
      */
     private String javaExecutable = "";
 
@@ -53,10 +64,13 @@ public final class WrapperConfig {
         return maxMemory;
     }
 
+    public int serviceJavaVersion() {
+        return serviceJavaVersion < 1 ? 25 : serviceJavaVersion;
+    }
+
+    /** Empty when the JVM should be detected rather than pinned. */
     public String javaExecutable() {
-        return javaExecutable == null || javaExecutable.isBlank()
-                ? Platform.javaExecutable()
-                : javaExecutable;
+        return javaExecutable == null ? "" : javaExecutable;
     }
 
     public String[] defaultJvmArguments() {

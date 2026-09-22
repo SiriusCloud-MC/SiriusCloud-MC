@@ -11,9 +11,12 @@ import dev.sirius.cloud.protocol.packet.PacketRegistry;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleHistoryPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleLinePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
+import dev.sirius.cloud.protocol.packet.impl.ServiceCrashReportPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStateUpdatePacket;
 import dev.sirius.cloud.wrapper.config.WrapperConfig;
 import dev.sirius.cloud.wrapper.jar.JarResolver;
+import dev.sirius.cloud.wrapper.java.JavaRuntime;
+import dev.sirius.cloud.wrapper.java.JavaRuntimeResolver;
 import dev.sirius.cloud.wrapper.network.WrapperPacketHandler;
 import dev.sirius.cloud.wrapper.process.ServiceProcessManager;
 import dev.sirius.cloud.wrapper.template.TemplateManager;
@@ -21,6 +24,7 @@ import dev.sirius.cloud.wrapper.template.TemplateManager;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Optional;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -45,6 +49,7 @@ public final class CloudWrapper {
 
     private final NetworkClient client = new NetworkClient(PacketRegistry.standard());
     private final PaperVersionCatalog versions = new PaperVersionCatalog();
+    private final JavaRuntimeResolver javaRuntimes = new JavaRuntimeResolver();
     private final ServiceProcessManager processes;
 
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
@@ -75,11 +80,14 @@ public final class CloudWrapper {
                 workingDirectory,
                 JarResolver.standard(jarDirectory, versions),
                 new TemplateManager(templatesDirectory),
+                javaRuntimes,
                 line -> client.send(new ConsoleLinePacket(line.serviceId(), line.serviceName(), line.line())),
                 backlog -> client.send(new ConsoleHistoryPacket(
                         backlog.serviceId(), backlog.serviceName(), backlog.lines())),
                 (serviceId, change) -> client.send(
-                        new ServiceStateUpdatePacket(serviceId, change.state(), change.exitCode())));
+                        new ServiceStateUpdatePacket(serviceId, change.state(), change.exitCode())),
+                crash -> client.send(new ServiceCrashReportPacket(
+                        crash.serviceId(), crash.serviceName(), crash.exitCode(), crash.lastLines())));
     }
 
     public void start() throws Exception {
@@ -92,9 +100,11 @@ public final class CloudWrapper {
         }
 
         processes.cleanStaleDirectories();
+        reportServiceRuntime();
 
-        WrapperPacketHandler handler = new WrapperPacketHandler(config, processes, connected -> {
-        });
+        WrapperPacketHandler handler = new WrapperPacketHandler(
+                config, processes, connected -> {
+                }, this::onAuthenticationRejected);
 
         client.connect(config.nodeHost(), config.nodePort(), handler);
 
@@ -109,6 +119,59 @@ public final class CloudWrapper {
 
         // The wrapper has no console of its own; it idles until it is stopped.
         shutdownLatch.await();
+    }
+
+    /**
+     * Checks up front that this machine can actually run services.
+     *
+     * <p>Detection happens at startup rather than lazily so that a missing JDK
+     * is a clear message on the first screen, not an unexplained crash loop the
+     * first time the node schedules something.
+     */
+    private void reportServiceRuntime() {
+        if (!config.javaExecutable().isBlank()) {
+            LOGGER.info("Services will run on the pinned JVM: {}", config.javaExecutable());
+            return;
+        }
+
+        int required = config.serviceJavaVersion();
+        Optional<JavaRuntime> runtime = javaRuntimes.find(required);
+
+        if (runtime.isPresent()) {
+            LOGGER.info("Services will run on {}", runtime.get());
+            return;
+        }
+
+        LOGGER.error("No Java {}+ installation found - services cannot start.", required);
+        javaRuntimes.discover().forEach(found -> LOGGER.error("  detected: {}", found));
+        try {
+            javaRuntimes.require(required);
+        } catch (java.io.IOException exception) {
+            LOGGER.error("  {}", exception.getMessage());
+        }
+    }
+
+    /**
+     * The node refused our credentials.
+     *
+     * <p>Stop reconnecting either way, then: with nothing running, exit, since
+     * an idle wrapper that can never register is only a confusing process to
+     * find later. With services running, stay up and leave them alone — the
+     * node's secret may have changed under a cloud full of players, and taking
+     * every server down over a config mismatch would be the worse outcome.
+     */
+    private void onAuthenticationRejected() {
+        client.stopReconnecting();
+
+        int running = processes.runningCount();
+        if (running == 0) {
+            LOGGER.error("Cannot register with the node. Fix 'secret' in config.json and restart.");
+            shutdown();
+            return;
+        }
+
+        LOGGER.error("Cannot register with the node, but {} service(s) are still running.", running);
+        LOGGER.error("They are left alone. Fix 'secret' in config.json and restart the wrapper.");
     }
 
     private void heartbeat() {

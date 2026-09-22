@@ -6,6 +6,8 @@ import dev.sirius.cloud.api.service.ServiceInfo;
 import dev.sirius.cloud.api.service.ServiceState;
 import dev.sirius.cloud.wrapper.config.WrapperConfig;
 import dev.sirius.cloud.wrapper.jar.JarResolver;
+import dev.sirius.cloud.wrapper.java.JavaRuntime;
+import dev.sirius.cloud.wrapper.java.JavaRuntimeResolver;
 import dev.sirius.cloud.wrapper.template.TemplateManager;
 import dev.sirius.cloud.wrapper.util.FileUtil;
 
@@ -32,10 +34,12 @@ public final class ServiceProcessManager {
 
     private final JarResolver jars;
     private final TemplateManager templates;
+    private final JavaRuntimeResolver javaRuntimes;
 
     private final Consumer<ConsoleLine> consoleSink;
     private final Consumer<ConsoleBacklog> backlogSink;
     private final BiConsumer<UUID, StateChange> stateSink;
+    private final Consumer<CrashReport> crashSink;
 
     private final Map<UUID, ServiceProcess> processes = new ConcurrentHashMap<>();
 
@@ -43,18 +47,22 @@ public final class ServiceProcessManager {
                                  Path workingDirectory,
                                  JarResolver jars,
                                  TemplateManager templates,
+                                 JavaRuntimeResolver javaRuntimes,
                                  Consumer<ConsoleLine> consoleSink,
                                  Consumer<ConsoleBacklog> backlogSink,
-                                 BiConsumer<UUID, StateChange> stateSink) {
+                                 BiConsumer<UUID, StateChange> stateSink,
+                                 Consumer<CrashReport> crashSink) {
         this.config = config;
         this.runningDirectory = workingDirectory.resolve("local").resolve("running");
         this.staticDirectory = workingDirectory.resolve("local").resolve("static");
         this.pluginJar = workingDirectory.resolve("plugins").resolve("cloud-plugin-paper.jar");
         this.jars = jars;
         this.templates = templates;
+        this.javaRuntimes = javaRuntimes;
         this.consoleSink = consoleSink;
         this.backlogSink = backlogSink;
         this.stateSink = stateSink;
+        this.crashSink = crashSink;
     }
 
     /**
@@ -67,6 +75,11 @@ public final class ServiceProcessManager {
     public void start(ServiceInfo info, ServiceGroup group, String token, String nodeHost, int nodePort) {
         Thread.ofVirtual().name("start-" + info.name()).start(() -> {
             try {
+                // Resolved before anything is copied or downloaded: if the
+                // machine cannot run this service at all, say so immediately
+                // rather than after a 60MB download and a doomed spawn.
+                String java = javaFor(group);
+
                 templates.prepare(group);
 
                 Path serverJar = jars.resolve(group.version(), group.build());
@@ -80,20 +93,28 @@ public final class ServiceProcessManager {
                         group,
                         config,
                         directory,
+                        java,
                         line -> consoleSink.accept(new ConsoleLine(info.uniqueId(), info.name(), line)),
                         (state, exitCode) -> {
                             stateSink.accept(info.uniqueId(), new StateChange(state, exitCode));
                             if (state.isTerminal()) {
                                 processes.remove(info.uniqueId());
                             }
-                        });
+                        },
+                        (exitCode, lastLines) -> crashSink.accept(
+                                new CrashReport(info.uniqueId(), info.name(), exitCode, lastLines)));
 
                 processes.put(info.uniqueId(), process);
                 process.start(serverJar, pluginJar, templates, token, nodeHost, nodePort);
 
             } catch (IOException exception) {
-                LOGGER.error("Could not start " + info.name(), exception);
+                LOGGER.error("Could not start {}: {}", info.name(), exception.getMessage());
                 processes.remove(info.uniqueId());
+
+                // The node has no other way to learn why, so the reason travels
+                // with the failure instead of only reaching this log file.
+                crashSink.accept(new CrashReport(
+                        info.uniqueId(), info.name(), -1, List.of(exception.getMessage())));
                 stateSink.accept(info.uniqueId(), new StateChange(ServiceState.CRASHED, -1));
             }
         });
@@ -189,6 +210,25 @@ public final class ServiceProcessManager {
 
     /** A service's buffered console history, replayed on attach. */
     public record ConsoleBacklog(UUID serviceId, String serviceName, List<String> lines) {
+    }
+
+    /** An unexpected exit, with the tail of what the service printed. */
+    public record CrashReport(UUID serviceId, String serviceName, int exitCode, List<String> lastLines) {
+    }
+
+    /**
+     * The JVM a group's services run on: its own override, then the wrapper's
+     * pinned path, then detection of a qualifying installation.
+     */
+    private String javaFor(dev.sirius.cloud.api.group.ServiceGroup group) throws IOException {
+        if (!group.javaExecutable().isBlank()) {
+            return group.javaExecutable();
+        }
+        if (!config.javaExecutable().isBlank()) {
+            return config.javaExecutable();
+        }
+        JavaRuntime runtime = javaRuntimes.require(config.serviceJavaVersion());
+        return runtime.executable().toString();
     }
 
     /** A lifecycle transition observed by the wrapper. */

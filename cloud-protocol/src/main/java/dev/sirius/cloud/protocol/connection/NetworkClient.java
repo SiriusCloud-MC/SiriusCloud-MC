@@ -34,6 +34,7 @@ public final class NetworkClient implements AutoCloseable {
 
     private final PacketRegistry registry;
     private final AtomicBoolean closed = new AtomicBoolean();
+    private final AtomicBoolean reconnecting = new AtomicBoolean(true);
 
     private EventLoopGroup group;
     private volatile Channel channel;
@@ -92,8 +93,19 @@ public final class NetworkClient implements AutoCloseable {
         return future;
     }
 
+    /**
+     * Stops trying to reconnect, without closing what is already open.
+     *
+     * <p>For failures that cannot fix themselves — a rejected handshake is a
+     * configuration error, not a blip — where retrying every few seconds only
+     * produces an endless wall of identical errors.
+     */
+    public void stopReconnecting() {
+        reconnecting.set(false);
+    }
+
     private void scheduleReconnect() {
-        if (closed.get() || group == null || group.isShuttingDown()) {
+        if (closed.get() || !reconnecting.get() || group == null || group.isShuttingDown()) {
             return;
         }
         group.schedule(this::doConnect, RECONNECT_DELAY_SECONDS, TimeUnit.SECONDS);

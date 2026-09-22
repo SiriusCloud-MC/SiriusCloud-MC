@@ -49,6 +49,17 @@ public final class NodeConsole implements AutoCloseable {
     private final Terminal terminal;
     private final LineReader reader;
 
+    /**
+     * False when there is no real TTY — piped stdin, systemd, a Windows
+     * service, a Docker container without {@code -t}.
+     *
+     * <p>In that case JLine redraws the prompt around every line it prints,
+     * which is right for a terminal and useless in a log file: each entry ends
+     * up prefixed with a stray prompt. So a non-interactive console drops the
+     * prompt entirely and writes plainly, and the log reads as a log.
+     */
+    private final boolean interactive;
+
     private volatile boolean running = true;
     private volatile ConsoleAttachment attachment;
 
@@ -75,13 +86,22 @@ public final class NodeConsole implements AutoCloseable {
                 .variable(LineReader.HISTORY_FILE, historyFile)
                 .build();
 
+        this.interactive = !terminal.getType().startsWith(Terminal.TYPE_DUMB);
+
         CloudLogger.sink(this::print);
     }
 
     /** Thread-safe: log lines may arrive from any Netty or process-pump thread. */
     public void print(String line) {
         try {
-            reader.printAbove(line);
+            if (interactive) {
+                reader.printAbove(line);
+            } else {
+                synchronized (terminal) {
+                    terminal.writer().println(line);
+                    terminal.writer().flush();
+                }
+            }
         } catch (Exception exception) {
             // Terminal already torn down (shutdown race). Fall back to stdout.
             System.out.println(line);
@@ -165,7 +185,7 @@ public final class NodeConsole implements AutoCloseable {
 
             String line;
             try {
-                line = reader.readLine(current == null ? PROMPT : servicePrompt(current.serviceName()));
+                line = reader.readLine(prompt(current));
             } catch (UserInterruptException exception) {
                 // Ctrl+C detaches rather than killing the node — while you are
                 // attached it reads as "leave this server", and shutting the
@@ -204,6 +224,13 @@ public final class NodeConsole implements AutoCloseable {
         }
         // A blank line is forwarded as-is: some server prompts expect one.
         current.input().accept(line);
+    }
+
+    private String prompt(ConsoleAttachment current) {
+        if (!interactive) {
+            return "";
+        }
+        return current == null ? PROMPT : servicePrompt(current.serviceName());
     }
 
     private static String servicePrompt(String serviceName) {
