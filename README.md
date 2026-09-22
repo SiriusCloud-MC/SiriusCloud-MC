@@ -9,7 +9,7 @@ Runs on **Linux and Windows**.
 | | Java |
 |---|---|
 | Node and wrapper | **21+** |
-| Minecraft services | **25+** — Minecraft 26.x refuses to start on anything lower |
+| Minecraft services | **25+** (Minecraft 26.x refuses to start on anything lower) |
 
 These are genuinely different requirements, so the wrapper does **not** run
 services on its own JVM. It locates a qualifying JDK on the machine at startup
@@ -51,7 +51,7 @@ different JDKs.
 
 | Module | Responsibility |
 |---|---|
-| `cloud-api` | Public contract. **Zero dependencies** — this is what third parties compile against. |
+| `cloud-api` | Public contract. **Zero dependencies**, because this is what third parties compile against. |
 | `cloud-protocol` | Packet definitions, codec, Netty transport. |
 | `cloud-driver` | The `CloudDriver` implementation over the network, plus the event bus. |
 | `cloud-node` | State, scheduling, provisioning loop, JLine console. |
@@ -72,15 +72,15 @@ must not disconnect players, so the processes keep running and the wrapper
 reconnects underneath them.
 
 That leaves the node holding records it cannot act on, which is fine, and it
-must not treat them as gone — releasing their names and ports would have the
+must not treat them as gone: releasing their names and ports would have the
 provisioning loop start replacements onto ports that are still bound. So the
 node keeps them, and the wrapper sends a **snapshot of everything it is
 actually running** immediately after each handshake:
 
 - Services the wrapper no longer reports really did die while nobody could see
   them, and are dropped.
-- Services the node has never heard of are **adopted** — their names and ports
-  re-reserved — rather than duplicated. That is a node that restarted under a
+- Services the node has never heard of are **adopted**, their names and ports
+  re-reserved, rather than duplicated. That is a node that restarted under a
   machine which kept running, and starting a second `Lobby-1` beside the live
   one is exactly what this prevents.
 
@@ -112,7 +112,7 @@ build/dist/
 ```
 
 > **First build:** `gradle/wrapper/gradle-wrapper.jar` is a binary and is not
-> committed. Fetch it once — `gradlew` prints the exact command if it is missing.
+> committed. Fetch it once; `gradlew` prints the exact command if it is missing.
 
 ---
 
@@ -154,7 +154,7 @@ First run asks you everything it needs:
 
 Memory defaults are read from the machine rather than guessed, and the port
 suggestion avoids colliding with groups you already have. It warns if the
-servers you asked for would exceed the budget you just set — otherwise that is
+servers you asked for would exceed the budget you just set. Otherwise that is
 discovered later as a group that accepts its configuration and then refuses to
 start.
 
@@ -164,7 +164,7 @@ With no terminal to ask on (systemd, a container without `-t`, piped stdin) it
 uses defaults instead of hanging on a prompt that can never be answered.
 
 **2. Start the wrapper.** It asks its own questions, including the secret the
-node just printed — no hand-editing JSON.
+node just printed. No hand-editing JSON.
 
 ```bash
 cd build/dist && ./start-wrapper.sh
@@ -231,7 +231,7 @@ sirius@node> stop Lobby-1
 a couple of servers running, interleaved output from all of them buries the
 node's own logs and is unreadable anyway. So the wrapper keeps a bounded ring
 buffer per service locally and sends *nothing* over the network until somebody
-asks — not "sends it and the node discards it", genuinely nothing.
+asks: not "sends it and the node discards it", genuinely nothing.
 
 To open one:
 
@@ -254,9 +254,9 @@ first so you see why it is in the state it is in.
 
 - `#detach`, `#exit`, `#quit` or `#back` return to the node. The `#` prefix
   cannot collide with a Minecraft command.
-- **Ctrl+C detaches** rather than shutting the node down — while attached it
-  reads as "leave this server", and killing the cloud instead would be a nasty
-  surprise. It still shuts down when you are not attached.
+- **Ctrl+C detaches** rather than shutting the node down, because while
+  attached it reads as "leave this server", and killing the cloud instead
+  would be a nasty surprise. It still shuts down when you are not attached.
 - If the service stops while you are attached, the console detaches itself.
   That happens over the event bus, not by a special case in the scheduler.
 
@@ -285,7 +285,7 @@ own. Reaching `RUNNING` clears the penalty.
 ## The proxy
 
 Players connect to a Velocity proxy; the proxy connects them onward to a
-server. `velocity.toml` lists **no servers at all** — the node tells the proxy
+server. `velocity.toml` lists **no servers at all**. The node tells the proxy
 about each backend as it becomes reachable, and tells it to forget one the
 moment it goes away:
 
@@ -304,7 +304,7 @@ the same state as one that was there from the beginning.
   least-loaded one, and `/hub` (aliases `/lobby`, `/l`) sends them back.
   Least-loaded rather than random, so a newly started lobby actually takes
   load instead of being ignored until chance finds it.
-- A server that disappears takes its players with it — they are moved to a
+- A server that disappears takes its players with it: they are moved to a
   lobby with a message, or disconnected with a reason if none is available,
   rather than left on a dead connection until they time out.
 
@@ -322,8 +322,8 @@ nothing to edit:
 back to 1 lobby           ->  max=50
 ```
 
-The total is recomputed per ping rather than cached — it is derived from a map
-that changes underneath, and a stale cached total is the exact bug this
+The total is recomputed per ping rather than cached, because it is derived from
+a map that changes underneath, and a stale cached total is the exact bug this
 replaces. With nothing registered it falls back to the configured figure,
 since a server list reading `0/0` looks broken rather than empty.
 
@@ -339,7 +339,7 @@ automatically**: the node generates a forwarding secret, the wrapper writes it
 to the proxy's `forwarding.secret` and into each backend's
 `config/paper-global.yml`. A connection without a valid signature is refused.
 
-That secret is separate from the cloud secret wrappers authenticate with —
+That secret is separate from the cloud secret wrappers authenticate with:
 it reaches every service directory on every machine, while the cloud secret
 never leaves the wrappers.
 
@@ -355,8 +355,8 @@ until you do.
 
 The node keeps a cloud-wide registry of who is online and where, fed by the
 proxies. Every operation resolves to "which proxy holds this player" and sends
-it one packet, so callers never need to know which proxy that is — that is what
-makes one cloud out of several of them.
+it one packet, so callers never need to know which proxy that is, and that is
+what makes one cloud out of several of them.
 
 ```
 sirius@node> players
@@ -376,7 +376,7 @@ and the node picks the least-loaded running instance. **Balancing lives on the
 node**, not the proxy, so every caller gets the same behaviour and a proxy needs
 no notion of what a group is.
 
-The same reach is available to plugins through `CloudDriver.players()` — a
+The same reach is available to plugins through `CloudDriver.players()`: a
 plugin on one lobby can move, message or kick a player who is on a different
 server behind a different proxy, without knowing any of that is true.
 
@@ -432,7 +432,7 @@ of them or `latest`.
 design of [`PaperVersionCatalog`](cloud-driver/src/main/java/dev/sirius/cloud/driver/paper/PaperVersionCatalog.java):
 Minecraft version strings have not kept one shape over time, and a comparator
 written against the shape they had today would silently mis-order the moment
-that changes — resolving `latest` to the wrong release. So PaperMC's own
+that changes, resolving `latest` to the wrong release. So PaperMC's own
 ordering is authoritative: newest last, `latest` is the final entry, "supported"
 means "in the list", and a version range is an *index* into that list rather
 than a numeric comparison. `minimumPaperVersion` in `node/config.json`
@@ -440,7 +440,7 @@ than a numeric comparison. `minimumPaperVersion` in `node/config.json`
 shows everything, and it never blocks a group from pinning an older release.
 
 `latest` resolves to the newest **stable** release. Release candidates are
-published alongside releases — the newest entry today is a `-rc` build — so
+published alongside releases (the newest entry today is a `-rc` build), so
 taking the literal last one would silently put every default group on a
 pre-release. Name one explicitly to opt in.
 
@@ -475,7 +475,7 @@ and prints it once:
 **It binds to loopback, and that default is deliberate.** This endpoint starts
 and stops servers, moves players and runs console commands: anything that can
 reach it can run the cloud. Widen `bindAddress` only behind a reverse proxy
-doing TLS — the token travels in a header, and plain HTTP puts it on the wire in
+doing TLS: the token travels in a header, and plain HTTP puts it on the wire in
 clear. The node says so loudly if you bind it anywhere else.
 
 The token is separate from the wrapper secret for the same reason the forwarding
@@ -488,19 +488,19 @@ Every `/api/` call needs `Authorization: Bearer <token>`.
 
 | | |
 |---|---|
-| `GET /api/v1/overview` | everything below in one response — what the panel polls |
+| `GET /api/v1/overview` | everything below in one response, which is what the panel polls |
 | `GET /api/v1/node`, `/nodes`, `/wrappers` | the control plane and its machines |
 | `GET /api/v1/groups`, `/services`, `/players` | what is configured, running and online |
 | `POST /api/v1/services` | `{"group":"Lobby","count":1}` |
 | `POST /api/v1/services/{name}/stop` | graceful stop |
 | `POST /api/v1/services/{name}/command` | `{"command":"say hello"}` |
-| `POST /api/v1/players/{uuid\|name}/connect` | `{"target":"Lobby"}` — service exactly, or group balanced |
+| `POST /api/v1/players/{uuid\|name}/connect` | `{"target":"Lobby"}`: service exactly, or group balanced |
 | `POST /api/v1/players/{uuid\|name}/message` | `{"message":"..."}` |
 | `POST /api/v1/players/{uuid\|name}/kick` | `{"reason":"..."}` |
 | `POST /api/v1/broadcast` | `{"message":"..."}` |
 
-A refusal from the cloud — "no running service of that group", "already at its
-maximum" — comes back as `409` with the reason, not a `500`: it is the caller's
+A refusal from the cloud ("no running service of that group", "already at its
+maximum") comes back as `409` with the reason, not a `500`: it is the caller's
 problem, not a server fault.
 
 ### The panel
@@ -513,8 +513,8 @@ and keeps it in local storage.
 It is **served by the node**, not hosted anywhere. A page hosted elsewhere could
 not reach an API on loopback, and pointing a public site at a control plane
 would mean exposing the control plane. Everything it renders goes in as text
-rather than markup — player names and MOTDs are attacker-controlled, and this
-page can stop servers.
+rather than markup, because player names and MOTDs are attacker-controlled and
+this page can stop servers.
 
 ---
 
@@ -523,7 +523,7 @@ page can stop servers.
 Both platforms are first-class. The places where that took real care:
 
 - **Graceful shutdown is stdin-driven.** `Process.destroy()` sends SIGTERM on
-  Linux but maps to `TerminateProcess` on Windows, which cannot be caught — a
+  Linux but maps to `TerminateProcess` on Windows, which cannot be caught. A
   "graceful" stop built on it would corrupt worlds on Windows while looking
   fine on Linux. Writing `stop` to the service's stdin is correct on both, so
   there is one code path. `destroy()` and then `destroyForcibly()` are the
@@ -535,7 +535,7 @@ Both platforms are first-class. The places where that took real care:
 - **UTF-8 on every process stream.** The native encoding is not UTF-8 on most
   Windows installs; decoding server output with it mangles non-ASCII text.
 - **The JVM is located via `java.home`**, with the `.exe` suffix added on
-  Windows — never assume `java` on `PATH` is the right one.
+  Windows. Never assume `java` on `PATH` is the right one.
 - **Templates are copied, not linked.** Symlinks on Windows need developer mode
   or elevation.
 - **Service names are looked up case-insensitively**, so `Lobby-1` behaves the
@@ -554,8 +554,8 @@ Frame:
 [4-byte length][varint packetId][bool hasQuery][uuid queryId?][payload]
 ```
 
-Packet ids are registered explicitly in `PacketRegistry.standard()` — the whole
-protocol is readable in one screen. Ids are grouped by direction; never
+Packet ids are registered explicitly in `PacketRegistry.standard()`, so the
+whole protocol is readable in one screen. Ids are grouped by direction; never
 renumber an existing one, append.
 
 Requests carry a `queryId` and the reply echoes it, which completes a
@@ -570,7 +570,7 @@ so a service can only ever authenticate as itself and the token dies with it.
 It stays valid for as long as the service is registered rather than being
 consumed on first use. Single-use sounds stronger and is not: a service reads
 the same file on every reconnect, so consuming it meant any dropped connection
-locked that service out permanently — including every service in the cloud when
+locked that service out permanently, including every service in the cloud when
 the node restarted. What single-use actually guarded against, a second
 connection claiming to be a service that is already here, is handled where it
 belongs: a service proving its identity supersedes the channel already
@@ -582,17 +582,17 @@ registered under its id.
 
 | Milestone | Contents |
 |---|---|
-| **1 — Skeleton** ✅ | Node, wrapper, protocol, Paper plugin, provisioning, attach console |
-| **2 — Proxy** ✅ | Velocity plugin, dynamic registration, `/hub`, modern forwarding |
-| **3 — Player layer** ✅ | Registry, transfers, messaging, kicks, restart re-sync |
-| **3b — Node-side templates** | Template storage on the node, pushed to wrappers |
-| **4 — Modules** | Module loader ✅, REST API ✅, web panel ✅ · sign walls, NPCs, permissions |
-| **5 — Scale** | Node clustering, leader election, state replication |
+| **1: Skeleton** ✅ | Node, wrapper, protocol, Paper plugin, provisioning, attach console |
+| **2: Proxy** ✅ | Velocity plugin, dynamic registration, `/hub`, modern forwarding |
+| **3: Player layer** ✅ | Registry, transfers, messaging, kicks, restart re-sync |
+| **3b: Node-side templates** | Template storage on the node, pushed to wrappers |
+| **4: Modules** | Module loader ✅, REST API ✅, web panel ✅ · sign walls, NPCs, permissions |
+| **5: Scale** | Node clustering, leader election, state replication |
 
 None of milestones 2–4 need core changes: the event bus and the module loader
 are the extension points, and the protocol was designed multi-node from the
 start so milestone 5 does not require rewriting it.
 
-The REST API is the first module and deliberately so — it uses nothing but
+The REST API is the first module and deliberately so: it uses nothing but
 `CloudDriver`, which makes it a standing check that the module contract is
 enough to build against.
