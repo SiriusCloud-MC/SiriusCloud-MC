@@ -1,0 +1,8 @@
+{
+  "id": "permissions",
+  "version": "1.0.0",
+  "main": "dev.sirius.cloud.module.permissions.PermissionsModule",
+  "apiVersion": "1.0.0",
+  "description": "Cloud-wide permission groups, prefixes and ranks",
+  "authors": ["Sirius"]
+}

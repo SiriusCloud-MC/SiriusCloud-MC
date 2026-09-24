@@ -7,8 +7,10 @@ include("cloud-node")
 include("cloud-wrapper")
 include("cloud-plugins:paper")
 include("cloud-plugins:velocity")
+include("cloud-plugins:permissions")
 include("cloud-modules:rest")
 include("cloud-modules:notify")
+include("cloud-modules:permissions")
 
 dependencyResolutionManagement {
     repositories {

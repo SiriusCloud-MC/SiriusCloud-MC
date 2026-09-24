@@ -1,0 +1,26 @@
+name: SiriusCloudPermissions
+version: '${version}'
+main: dev.sirius.cloud.plugin.permissions.PermissionsPlugin
+api-version: '1.21'
+author: Sirius
+description: Applies the cloud's permission groups on this server.
+website: https://github.com/SiriusCloud-MC/SiriusCloud-MC
+
+# The core plugin binds CloudDriver and shades the API this one compiles
+# against, so it has to be loaded and enabled first.
+depend:
+  - SiriusCloud
+
+commands:
+  perms:
+    description: Manage cloud-wide permission groups and ranks.
+    usage: /perms
+    aliases: [permissions, cloudperms]
+
+permissions:
+  siriuscloud.perms.manage:
+    description: Full access to /perms, including editing groups and ranks.
+    default: op
+  siriuscloud.perms.view:
+    description: Read-only /perms - list groups and inspect players.
+    default: op

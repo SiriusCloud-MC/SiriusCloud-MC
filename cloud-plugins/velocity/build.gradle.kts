@@ -67,6 +67,16 @@ tasks.shadowJar {
 
     mergeServiceFiles()
     minimize {
+        // This plugin is what provides cloud-api to every other cloud plugin
+        // on the server: Bukkit shares classes between plugins, and a separate
+        // plugin like the permissions one compiles against the API without
+        // shading its own copy, precisely so that CloudDriver.instance()
+        // returns something it can cast. Minimising the API to what this
+        // plugin happens to use strips the rest, and the other plugin fails at
+        // runtime with a NoClassDefFoundError for a type it can see at compile
+        // time. The whole public contract has to ship.
+        exclude(project(":cloud-api"))
+
         // Both are reached reflectively, so reachability analysis cannot see
         // what they need: Netty resolves handlers by name, Gson builds
         // adapters from the model classes it is handed.

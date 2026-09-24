@@ -47,8 +47,11 @@ val dist by tasks.registering(Copy::class) {
     val velocityPlugin = project(":cloud-plugins:velocity").tasks.named("shadowJar")
     val restModule = project(":cloud-modules:rest").tasks.named("jar")
     val notifyModule = project(":cloud-modules:notify").tasks.named("jar")
+    val permissionsModule = project(":cloud-modules:permissions").tasks.named("jar")
+    val permissionsPlugin = project(":cloud-plugins:permissions").tasks.named("jar")
 
-    dependsOn(nodeJar, wrapperJar, paperPlugin, velocityPlugin, restModule, notifyModule)
+    dependsOn(nodeJar, wrapperJar, paperPlugin, velocityPlugin, restModule, notifyModule,
+            permissionsModule, permissionsPlugin)
 
     into(layout.buildDirectory.dir("dist"))
 
@@ -79,6 +82,18 @@ val dist by tasks.registering(Copy::class) {
     from(notifyModule) {
         into("node/modules")
         rename { "cloud-module-notify.jar" }
+    }
+    from(permissionsModule) {
+        into("node/modules")
+        rename { "cloud-module-permissions.jar" }
+    }
+    // Not injected into services automatically, unlike the core plugin:
+    // permissions are opt-in, and a server already running LuckPerms must not
+    // have a second thing attaching permissions to its players. Copy it into a
+    // group's template to use it.
+    from(permissionsPlugin) {
+        into("wrapper/optional-plugins")
+        rename { "cloud-plugin-permissions.jar" }
     }
     from("scripts") {
         into(".")
