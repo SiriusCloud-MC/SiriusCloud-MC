@@ -53,6 +53,23 @@ public final class GroupRegistry {
 
     }
 
+    /**
+     * Re-reads every group file from disk.
+     *
+     * <p>Replaces rather than merges, so a file deleted by hand really does
+     * remove the group instead of leaving it live until the next restart.
+     * Running services are untouched: a group definition describes what future
+     * services look like, and quietly restarting somebody's servers because
+     * they edited a JSON file would be a nasty surprise.
+     *
+     * @return how many groups are loaded afterwards
+     */
+    public synchronized int reload() throws IOException {
+        groups.clear();
+        load();
+        return groups.size();
+    }
+
     public boolean isEmpty() {
         return groups.isEmpty();
     }

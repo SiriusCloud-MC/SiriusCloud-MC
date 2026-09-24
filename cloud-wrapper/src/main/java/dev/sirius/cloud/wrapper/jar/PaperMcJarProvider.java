@@ -19,6 +19,8 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Comparator;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.HexFormat;
 import java.util.Optional;
 import java.util.stream.Stream;
@@ -52,6 +54,18 @@ public final class PaperMcJarProvider implements JarProvider {
             .connectTimeout(Duration.ofSeconds(10))
             .followRedirects(HttpClient.Redirect.NORMAL)
             .build();
+
+    /**
+     * One lock per cached jar, so a group starting several services at once
+     * downloads it once rather than once per service.
+     *
+     * <p>Not an optimisation. Without it every concurrent start wrote to the
+     * same temporary file and they corrupted each other, producing "Invalid or
+     * corrupt jarfile" on servers whose only mistake was starting at the same
+     * time as their siblings - and the first one to finish deleted the file the
+     * others were still writing.
+     */
+    private static final Map<String, Object> DOWNLOAD_LOCKS = new ConcurrentHashMap<>();
 
     private final Path cacheDirectory;
     private final PaperVersionCatalog catalog;
@@ -109,7 +123,16 @@ public final class PaperMcJarProvider implements JarProvider {
             return target;
         }
 
-        download(ref, target, version);
+        // Serialised per jar: the second service to want this waits for the
+        // first one's download instead of starting its own on top of it.
+        synchronized (DOWNLOAD_LOCKS.computeIfAbsent(target.toString(), key -> new Object())) {
+            // Re-checked inside the lock, because whoever held it before us was
+            // very likely downloading exactly this.
+            if (Files.isRegularFile(target) && Files.size(target) > 0) {
+                return target;
+            }
+            download(ref, target, version);
+        }
         return target;
     }
 
@@ -229,7 +252,11 @@ public final class PaperMcJarProvider implements JarProvider {
 
         // Download beside the target, then move: an interrupted download must
         // never leave a half-written jar that looks like a valid cache entry.
-        Path temporary = target.resolveSibling(target.getFileName() + ".part");
+        // The name is unique per attempt so that two downloads of the same jar
+        // - from a second wrapper sharing this directory, or a retry racing a
+        // straggler - cannot write to one file or delete each other's.
+        Path temporary = target.resolveSibling(
+                target.getFileName() + "." + java.util.UUID.randomUUID() + ".part");
 
         try {
             HttpRequest request = HttpRequest.newBuilder(URI.create(ref.url))

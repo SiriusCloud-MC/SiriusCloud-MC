@@ -33,6 +33,27 @@ public final class NodeConfig {
      */
     private String forwardingSecret = UUID.randomUUID().toString();
 
+    /**
+     * Secret external tools and modules authenticate with.
+     *
+     * <p>Separate from {@link #secret} because the two grant different things.
+     * A wrapper's secret lets a machine register and receive orders to spawn
+     * processes; an API client only needs to read state and ask for services.
+     * Sharing one value meant a leaked API token could register a fake wrapper
+     * and be handed real work, which is a much larger problem than the token
+     * was supposed to represent.
+     */
+    private String apiSecret = UUID.randomUUID().toString();
+
+    /**
+     * Whether API clients may only read.
+     *
+     * <p>Off by default, because the API is how panels and bots do useful
+     * things. Turning it on makes every external client observation-only
+     * without having to take their credentials away.
+     */
+    private boolean apiReadOnly = false;
+
     /** Memory the node is willing to see committed across all services, in MB. */
     private int maxMemory = 4096;
 
@@ -119,6 +140,20 @@ public final class NodeConfig {
             forwardingSecret = UUID.randomUUID().toString();
         }
         return forwardingSecret;
+    }
+
+    public String apiSecret() {
+        if (apiSecret == null || apiSecret.isBlank()) {
+            // Upgrading from a config written before the split. Generating a
+            // fresh one is right: falling back to the wrapper secret would
+            // silently preserve exactly the behaviour this replaced.
+            apiSecret = UUID.randomUUID().toString();
+        }
+        return apiSecret;
+    }
+
+    public boolean apiReadOnly() {
+        return apiReadOnly;
     }
 
     public int maxMemory() {

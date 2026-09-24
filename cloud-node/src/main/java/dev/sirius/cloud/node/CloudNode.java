@@ -13,7 +13,11 @@ import dev.sirius.cloud.driver.paper.PaperVersionCatalog;
 import dev.sirius.cloud.node.command.CommandManager;
 import dev.sirius.cloud.node.command.commands.AttachCommand;
 import dev.sirius.cloud.node.command.commands.BroadcastCommand;
+import dev.sirius.cloud.node.command.commands.EditCommand;
 import dev.sirius.cloud.node.command.commands.ExecuteCommand;
+import dev.sirius.cloud.node.command.commands.MaintenanceCommand;
+import dev.sirius.cloud.node.command.commands.ReloadCommand;
+import dev.sirius.cloud.node.command.commands.RestartCommand;
 import dev.sirius.cloud.node.command.commands.GroupsCommand;
 import dev.sirius.cloud.node.command.commands.HelpCommand;
 import dev.sirius.cloud.node.command.commands.InfoCommand;
@@ -121,6 +125,11 @@ public final class CloudNode {
         // stack trace instead of an explanation.
         directoryLock = DirectoryLock.acquire(workingDirectory.resolve(".lock"), "node");
 
+        // Checked here rather than left to Netty. A port already in use is the
+        // single most common startup failure, and a BindException stack trace
+        // buries the one sentence that would tell the operator what to do.
+        requirePortAvailable(config.bindAddress(), config.port());
+
         console = new NodeConsole(commands, workingDirectory.resolve("local").resolve("console_history"));
         printBanner();
 
@@ -186,6 +195,8 @@ public final class CloudNode {
 
         LOGGER.info("Services connect back to {}:{}", config.connectAddress(), config.port());
         LOGGER.info("Wrapper secret: {}", config.secret());
+        LOGGER.info("API secret: {}{}", config.apiSecret(),
+                config.apiReadOnly() ? " (read-only)" : "");
         LOGGER.info("Waiting for a wrapper to connect. Type 'help' for commands.");
         LOGGER.info("Service consoles are hidden until you 'attach <service>'.");
 
@@ -204,6 +215,24 @@ public final class CloudNode {
 
         // Blocks this thread until the console exits.
         console.run(this::shutdown);
+    }
+
+    /**
+     * Fails early and readably if the listen port is taken.
+     *
+     * <p>The check is advisory: something could claim the port between here and
+     * the real bind. It exists to turn the overwhelmingly common case into a
+     * sentence rather than a stack trace, not to make the race impossible.
+     */
+    private void requirePortAvailable(String host, int port) throws IOException {
+        try (java.net.ServerSocket probe = new java.net.ServerSocket()) {
+            probe.setReuseAddress(true);
+            probe.bind(new java.net.InetSocketAddress(host, port));
+        } catch (IOException exception) {
+            throw new IOException("Port " + port + " on " + host + " is already in use. "
+                    + "Another node is probably running, or something else has taken the port. "
+                    + "Stop it, or change 'port' in node/config.json.");
+        }
     }
 
     public void shutdown() {
@@ -259,6 +288,10 @@ public final class CloudNode {
         commands.register(new GroupsCommand(groups, services));
         commands.register(new StartCommand(groups, serviceManager));
         commands.register(new StopCommand(services, serviceManager));
+        commands.register(new RestartCommand(services, serviceManager));
+        commands.register(new EditCommand(groups));
+        commands.register(new MaintenanceCommand(groups));
+        commands.register(new ReloadCommand(groups));
         commands.register(new ExecuteCommand(services, serviceManager));
         commands.register(new AttachCommand(services, serviceManager, console));
         commands.register(new VersionsCommand(paperVersions, velocityVersions, config.minimumPaperVersion()));

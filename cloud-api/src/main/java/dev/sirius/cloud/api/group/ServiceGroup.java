@@ -188,9 +188,17 @@ public final class ServiceGroup {
         return build == null || build.isBlank() ? "latest" : build;
     }
 
+    public void build(String build) {
+        this.build = build;
+    }
+
     /** Empty when the wrapper's configured JVM should be used. */
     public String javaExecutable() {
         return javaExecutable == null ? "" : javaExecutable;
+    }
+
+    public void javaExecutable(String javaExecutable) {
+        this.javaExecutable = javaExecutable;
     }
 
     @Override

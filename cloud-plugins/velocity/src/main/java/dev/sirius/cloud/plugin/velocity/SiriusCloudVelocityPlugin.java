@@ -5,7 +5,9 @@ import com.google.gson.JsonParser;
 import com.google.inject.Inject;
 import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.command.SimpleCommand;
+import com.velocitypowered.api.event.ResultedEvent;
 import com.velocitypowered.api.event.Subscribe;
+import com.velocitypowered.api.event.connection.LoginEvent;
 import com.velocitypowered.api.event.connection.DisconnectEvent;
 import com.velocitypowered.api.event.connection.PostLoginEvent;
 import com.velocitypowered.api.event.player.PlayerChooseInitialServerEvent;
@@ -143,6 +145,12 @@ public final class SiriusCloudVelocityPlugin {
                 proxy.getCommandManager().metaBuilder("cloud").aliases("siriuscloud", "sc").build(),
                 new CloudCommand());
 
+        // Velocity's own /server only knows servers from velocity.toml, and
+        // this cloud deliberately lists none there.
+        proxy.getCommandManager().register(
+                proxy.getCommandManager().metaBuilder("server").build(),
+                new ServerCommand(proxy));
+
         client = new NetworkClient(PacketRegistry.standard());
         client.connect(connection.nodeHost(), connection.nodePort(), new ProxyPacketHandler());
 
@@ -257,6 +265,31 @@ public final class SiriusCloudVelocityPlugin {
      * still be cancelled, and announcing a player who is then refused would
      * leave the node holding someone who never arrived.
      */
+    /**
+     * Turns the advertised slot count into an actual limit.
+     *
+     * <p>The proxy already advertises the sum of its backends' capacity, but
+     * Velocity never enforces {@code show-max-players} - it is a number in a
+     * ping and nothing else. So a server list reading 50/50 would happily
+     * accept the fifty-first player, which makes the figure a decoration.
+     *
+     * <p>{@code siriuscloud.joinfull} bypasses it, so staff can still get in
+     * to deal with whatever filled the cloud up.
+     */
+    @Subscribe
+    public void onLogin(LoginEvent event) {
+        int capacity = advertisedCapacity();
+        if (capacity <= 0 || proxy.getPlayerCount() < capacity) {
+            return;
+        }
+        if (event.getPlayer().hasPermission("siriuscloud.joinfull")) {
+            return;
+        }
+        event.setResult(ResultedEvent.ComponentResult.denied(
+                Component.text("The network is full (" + proxy.getPlayerCount()
+                        + "/" + capacity + ").", NamedTextColor.RED)));
+    }
+
     @Subscribe
     public void onPostLogin(PostLoginEvent event) {
         if (client == null) {

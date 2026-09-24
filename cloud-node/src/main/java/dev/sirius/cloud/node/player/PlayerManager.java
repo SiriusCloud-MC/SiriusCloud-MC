@@ -13,7 +13,11 @@ import dev.sirius.cloud.protocol.packet.impl.PlayerConnectRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerKickPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerMessagePacket;
 
+import java.util.ArrayDeque;
 import java.util.Comparator;
+import java.util.Deque;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -29,9 +33,28 @@ public final class PlayerManager {
 
     private static final CloudLogger LOGGER = CloudLogger.of("Players");
 
+    /**
+     * How long a transfer counts against a service's load.
+     *
+     * <p>Long enough to cover a connection handshake and a world load, short
+     * enough that a transfer which silently failed stops skewing the balance.
+     */
+    private static final long PENDING_TRANSFER_MILLIS = 10_000;
+
     private final PlayerRegistry players;
     private final ServiceRegistry services;
     private final ServiceChannelRegistry serviceChannels;
+
+    /**
+     * Transfers sent but not yet reflected in a player count.
+     *
+     * <p>Service player counts arrive on a heartbeat, so they are up to ten
+     * seconds stale. Balancing on them alone means a burst of joins all sees
+     * the same "emptiest" server and piles onto it, which is the exact failure
+     * least-loaded balancing exists to avoid. Counting what is already on its
+     * way closes the window.
+     */
+    private final Map<UUID, Deque<Long>> pendingTransfers = new ConcurrentHashMap<>();
 
     public PlayerManager(PlayerRegistry players,
                          ServiceRegistry services,
@@ -52,6 +75,7 @@ public final class PlayerManager {
         if (target.get().state() != ServiceState.RUNNING) {
             return failed(serviceName + " is " + target.get().state() + ", not running");
         }
+        recordTransfer(target.get().uniqueId());
         return send(playerId, player -> new PlayerConnectRequestPacket(playerId, target.get().name()));
     }
 
@@ -65,12 +89,57 @@ public final class PlayerManager {
         Optional<ServiceInfo> target = services.ofGroup(groupName).stream()
                 .filter(service -> service.state() == ServiceState.RUNNING)
                 .filter(service -> service.type() == ServiceType.SERVER)
-                .min(Comparator.comparingInt(ServiceInfo::playerCount));
+                .min(Comparator.comparingInt(this::effectiveLoad));
 
         if (target.isEmpty()) {
             return failed("No running service of group '" + groupName + "'");
         }
         return connect(playerId, target.get().name());
+    }
+
+    /** A service's reported players, plus the transfers already heading for it. */
+    private int effectiveLoad(ServiceInfo service) {
+        return service.playerCount() + pendingCount(service.uniqueId());
+    }
+
+    private int pendingCount(UUID serviceId) {
+        Deque<Long> pending = pendingTransfers.get(serviceId);
+        if (pending == null) {
+            return 0;
+        }
+        long cutoff = System.currentTimeMillis() - PENDING_TRANSFER_MILLIS;
+        // Expired entries are dropped as they are counted rather than on a
+        // timer: the only moment the count matters is when it is read.
+        synchronized (pending) {
+            while (!pending.isEmpty() && pending.peekFirst() < cutoff) {
+                pending.removeFirst();
+            }
+            return pending.size();
+        }
+    }
+
+    private void recordTransfer(UUID serviceId) {
+        Deque<Long> pending = pendingTransfers.computeIfAbsent(
+                serviceId, key -> new ArrayDeque<>());
+        synchronized (pending) {
+            pending.addLast(System.currentTimeMillis());
+        }
+    }
+
+    /**
+     * Stops counting a transfer once the player has actually landed.
+     *
+     * <p>Called when a proxy reports the switch, so a service that filled up
+     * quickly is not double-counted: its own player count now includes them.
+     */
+    public void transferCompleted(UUID serviceId) {
+        Deque<Long> pending = pendingTransfers.get(serviceId);
+        if (pending == null) {
+            return;
+        }
+        synchronized (pending) {
+            pending.pollFirst();
+        }
     }
 
     public CompletableFuture<Void> sendMessage(UUID playerId, String message) {

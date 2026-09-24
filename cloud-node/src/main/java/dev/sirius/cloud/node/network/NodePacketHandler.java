@@ -125,6 +125,18 @@ public final class NodePacketHandler implements PacketHandler {
             return;
         }
 
+        // An API client may be restricted to observation without revoking its
+        // credentials. Checked centrally rather than per packet, so a new
+        // mutating packet is covered by default instead of by remembering.
+        if (channel.type() == ConnectionType.API && config.apiReadOnly() && mutates(packet)) {
+            LOGGER.warn("Refusing {} from read-only API client {}",
+                    packet.getClass().getSimpleName(), channel.name());
+            if (packet.queryId() != null) {
+                channel.respond(packet, AcknowledgePacket.fail("This API client is read-only"));
+            }
+            return;
+        }
+
         if (packet instanceof HeartbeatPacket heartbeat) {
             wrappers.byChannel(channel).ifPresent(wrapper -> wrapper.heartbeat(heartbeat.usedMemory()));
             // Echoed so the peer's read timeout sees traffic from us too.
@@ -156,6 +168,11 @@ public final class NodePacketHandler implements PacketHandler {
             players.byId(switched.playerId()).ifPresent(player -> {
                 String previous = player.serverName().orElse(null);
                 player.server(switched.serverId(), switched.serverName());
+                // They have landed, so they now show in that service's own
+                // player count and must stop being counted as in flight.
+                if (switched.serverId() != null) {
+                    playerManager.transferCompleted(switched.serverId());
+                }
                 events.post(new PlayerSwitchServerEvent(player, previous));
                 LOGGER.debug("{}: {} -> {}", player.name(), previous, switched.serverName());
             });
@@ -295,6 +312,17 @@ public final class NodePacketHandler implements PacketHandler {
         }
     }
 
+    /** Whether a packet changes cloud state, as opposed to reading it. */
+    private static boolean mutates(Packet packet) {
+        return packet instanceof ServiceStartRequestPacket
+                || packet instanceof ServiceStopPacket
+                || packet instanceof ConsoleCommandPacket
+                || packet instanceof PlayerConnectRequestPacket
+                || packet instanceof PlayerMessagePacket
+                || packet instanceof PlayerKickPacket
+                || packet instanceof ChannelMessagePacket;
+    }
+
     private void handleHandshake(NetworkChannel channel, HandshakePacket handshake) {
         if (channel.authenticated()) {
             channel.close();
@@ -305,9 +333,15 @@ public final class NodePacketHandler implements PacketHandler {
         String message;
 
         switch (handshake.type()) {
-            case WRAPPER, API -> {
+            case WRAPPER -> {
                 accepted = config.secret().equals(handshake.credential());
                 message = accepted ? "welcome" : "invalid secret";
+            }
+            case API -> {
+                // A different secret, so a leaked API token cannot be used to
+                // register a machine and be handed processes to run.
+                accepted = config.apiSecret().equals(handshake.credential());
+                message = accepted ? "welcome" : "invalid API secret";
             }
             case SERVICE -> {
                 accepted = handshake.serviceId() != null
