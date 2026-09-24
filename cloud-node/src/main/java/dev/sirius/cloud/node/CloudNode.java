@@ -142,7 +142,7 @@ public final class CloudNode {
         // Held as well as bound: the packet handler answers node queries through
         // it, so the API and the console describe the node from one place.
         LocalCloudDriver driver = new LocalCloudDriver(
-                serviceManager, services, groups, events, players, playerManager, wrappers, config);
+                serviceManager, services, groups, events, players, playerManager, wrappers, config, serviceChannels);
         CloudDriver.bind(driver);
 
         // An attached console must not outlive the service it is attached to.

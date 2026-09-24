@@ -1,6 +1,7 @@
 package dev.sirius.cloud.api.driver;
 
 import dev.sirius.cloud.api.event.EventManager;
+import dev.sirius.cloud.api.messaging.MessagingProvider;
 
 /**
  * The single entry point into the cloud.
@@ -20,6 +21,9 @@ public interface CloudDriver {
 
     /** The control plane itself, and the machines attached to it. */
     NodeProvider node();
+
+    /** Publish/subscribe between everything in the cloud, brokered by the node. */
+    MessagingProvider messaging();
 
     EventManager events();
 

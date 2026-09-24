@@ -5,6 +5,7 @@ jline = "3.26.3"
 paper = "1.21.4-R0.1-SNAPSHOT"
 velocity = "4.2.0"
 snakeyaml = "2.3"
+luckperms = "5.4"
 shadow = "8.3.5"
 
 [libraries]
@@ -18,6 +19,7 @@ jline-terminal-jni = { module = "org.jline:jline-terminal-jni", version.ref = "j
 paper-api = { module = "io.papermc.paper:paper-api", version.ref = "paper" }
 velocity-api = { module = "com.velocitypowered:velocity-api", version.ref = "velocity" }
 snakeyaml = { module = "org.yaml:snakeyaml", version.ref = "snakeyaml" }
+luckperms-api = { module = "net.luckperms:api", version.ref = "luckperms" }
 
 [bundles]
 netty = ["netty-handler", "netty-codec", "netty-transport"]

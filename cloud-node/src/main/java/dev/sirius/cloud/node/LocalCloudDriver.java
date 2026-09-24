@@ -3,6 +3,8 @@ package dev.sirius.cloud.node;
 import dev.sirius.cloud.api.driver.CloudDriver;
 import dev.sirius.cloud.api.driver.GroupProvider;
 import dev.sirius.cloud.api.driver.NodeProvider;
+import dev.sirius.cloud.api.messaging.ChannelMessage;
+import dev.sirius.cloud.api.messaging.MessagingProvider;
 import dev.sirius.cloud.api.driver.PlayerProvider;
 import dev.sirius.cloud.api.driver.ServiceProvider;
 import dev.sirius.cloud.api.player.CloudPlayer;
@@ -15,6 +17,7 @@ import dev.sirius.cloud.node.group.GroupRegistry;
 import dev.sirius.cloud.node.player.PlayerManager;
 import dev.sirius.cloud.node.player.PlayerRegistry;
 import dev.sirius.cloud.node.service.ServiceManager;
+import dev.sirius.cloud.node.service.ServiceChannelRegistry;
 import dev.sirius.cloud.node.service.ServiceRegistry;
 import dev.sirius.cloud.node.wrapper.ConnectedWrapper;
 import dev.sirius.cloud.node.wrapper.WrapperRegistry;
@@ -45,6 +48,7 @@ public final class LocalCloudDriver implements CloudDriver {
     private final WrapperRegistry wrapperRegistry;
     private final NodeConfig config;
     private final long startedAt = System.currentTimeMillis();
+    private final LocalMessagingProvider messaging;
 
     public LocalCloudDriver(ServiceManager serviceManager,
                             ServiceRegistry serviceRegistry,
@@ -53,7 +57,8 @@ public final class LocalCloudDriver implements CloudDriver {
                             PlayerRegistry playerRegistry,
                             PlayerManager playerManager,
                             WrapperRegistry wrapperRegistry,
-                            NodeConfig config) {
+                            NodeConfig config,
+                            ServiceChannelRegistry serviceChannels) {
         this.serviceManager = serviceManager;
         this.serviceRegistry = serviceRegistry;
         this.groupRegistry = groupRegistry;
@@ -62,6 +67,7 @@ public final class LocalCloudDriver implements CloudDriver {
         this.playerManager = playerManager;
         this.wrapperRegistry = wrapperRegistry;
         this.config = config;
+        this.messaging = new LocalMessagingProvider(serviceChannels);
     }
 
     /** The node's own description, rebuilt per call so the counters are current. */
@@ -219,6 +225,16 @@ public final class LocalCloudDriver implements CloudDriver {
                 return wrapperRegistry.byName(name).map(ConnectedWrapper::info);
             }
         };
+    }
+
+    @Override
+    public MessagingProvider messaging() {
+        return messaging;
+    }
+
+    /** Routes an inbound channel message from a service to node-side subscribers. */
+    public void deliverChannelMessage(ChannelMessage message) {
+        messaging.deliver(message);
     }
 
     @Override

@@ -4,4 +4,58 @@ main: dev.sirius.cloud.plugin.paper.SiriusCloudPlugin
 api-version: '1.21'
 author: Sirius
 description: Connects this server to its SiriusCloud node.
+website: https://github.com/SiriusCloud-MC/SiriusCloud-MC
 load: POSTWORLD
+
+# LuckPerms resolves its messaging service while it enables, so our messenger
+# has to be registered before that happens.
+loadbefore:
+  - LuckPerms
+
+softdepend:
+  - LuckPerms
+
+commands:
+  cloud:
+    description: Inspect and control the cloud from in game.
+    usage: /cloud
+    aliases: [siriuscloud, sc]
+
+permissions:
+  siriuscloud.notify:
+    description: Receives cloud event notifications in chat.
+    default: op
+  siriuscloud.command.*:
+    description: Every /cloud subcommand.
+    default: op
+    children:
+      siriuscloud.command.list: true
+      siriuscloud.command.info: true
+      siriuscloud.command.start: true
+      siriuscloud.command.stop: true
+      siriuscloud.command.players: true
+      siriuscloud.command.find: true
+      siriuscloud.command.send: true
+      siriuscloud.command.broadcast: true
+      siriuscloud.command.wrappers: true
+      siriuscloud.command.node: true
+  siriuscloud.command.list:
+    default: op
+  siriuscloud.command.info:
+    default: op
+  siriuscloud.command.start:
+    default: op
+  siriuscloud.command.stop:
+    default: op
+  siriuscloud.command.players:
+    default: op
+  siriuscloud.command.find:
+    default: op
+  siriuscloud.command.send:
+    default: op
+  siriuscloud.command.broadcast:
+    default: op
+  siriuscloud.command.wrappers:
+    default: op
+  siriuscloud.command.node:
+    default: op

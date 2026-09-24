@@ -2,15 +2,18 @@ package dev.sirius.cloud.plugin.paper;
 
 import dev.sirius.cloud.api.driver.CloudDriver;
 import dev.sirius.cloud.api.logging.CloudLogger;
+import dev.sirius.cloud.api.messaging.ChannelMessage;
 import dev.sirius.cloud.api.platform.Platform;
 import dev.sirius.cloud.api.service.ServiceState;
 import dev.sirius.cloud.driver.RemoteCloudDriver;
+import dev.sirius.cloud.plugin.paper.luckperms.LuckPermsSupport;
 import dev.sirius.cloud.protocol.connection.NetworkChannel;
 import dev.sirius.cloud.protocol.connection.NetworkClient;
 import dev.sirius.cloud.protocol.connection.PacketHandler;
 import dev.sirius.cloud.protocol.packet.ConnectionType;
 import dev.sirius.cloud.protocol.packet.Packet;
 import dev.sirius.cloud.protocol.packet.PacketRegistry;
+import dev.sirius.cloud.protocol.packet.impl.ChannelMessagePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
@@ -44,10 +47,21 @@ public final class SiriusCloudPlugin extends JavaPlugin implements Listener {
 
     private ConnectionFile connection;
     private NetworkClient client;
+    private RemoteCloudDriver driver;
 
     private final AtomicBoolean authenticated = new AtomicBoolean();
     private final AtomicBoolean serverLoaded = new AtomicBoolean();
     private final AtomicBoolean readySent = new AtomicBoolean();
+
+    /**
+     * LuckPerms resolves its messaging service while it enables, so the
+     * provider has to be registered before that. {@code loadbefore} in
+     * plugin.yml puts us first; this is the only work that has to happen here.
+     */
+    @Override
+    public void onLoad() {
+        LuckPermsSupport.enable();
+    }
 
     @Override
     public void onEnable() {
@@ -71,7 +85,17 @@ public final class SiriusCloudPlugin extends JavaPlugin implements Listener {
         client = new NetworkClient(PacketRegistry.standard());
         client.connect(connection.nodeHost(), connection.nodePort(), new ServicePacketHandler());
 
-        CloudDriver.bind(new RemoteCloudDriver("SERVICE", client));
+        driver = new RemoteCloudDriver("SERVICE", client);
+        CloudDriver.bind(driver);
+
+        CloudNotifications.register();
+
+        var cloudCommand = new CloudCommand();
+        var registered = getCommand("cloud");
+        if (registered != null) {
+            registered.setExecutor(cloudCommand);
+            registered.setTabCompleter(cloudCommand);
+        }
 
         Bukkit.getScheduler().runTaskTimerAsynchronously(this, this::heartbeat,
                 HEARTBEAT_TICKS, HEARTBEAT_TICKS);
@@ -147,6 +171,12 @@ public final class SiriusCloudPlugin extends JavaPlugin implements Listener {
 
         @Override
         public void onPacket(NetworkChannel channel, Packet packet) {
+            if (packet instanceof ChannelMessagePacket message) {
+                driver.deliverChannelMessage(new ChannelMessage(
+                        message.channel(), message.payload(), message.sourceService()));
+                return;
+            }
+
             if (packet instanceof HandshakeResponsePacket response) {
                 if (response.accepted()) {
                     channel.authenticated(true);

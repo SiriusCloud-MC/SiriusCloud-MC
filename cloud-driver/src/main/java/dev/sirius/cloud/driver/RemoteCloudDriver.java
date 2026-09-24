@@ -7,6 +7,8 @@ import dev.sirius.cloud.api.driver.PlayerProvider;
 import dev.sirius.cloud.api.driver.ServiceProvider;
 import dev.sirius.cloud.api.player.CloudPlayer;
 import dev.sirius.cloud.api.event.EventManager;
+import dev.sirius.cloud.api.messaging.ChannelMessage;
+import dev.sirius.cloud.api.messaging.MessagingProvider;
 import dev.sirius.cloud.api.service.ServiceInfo;
 import dev.sirius.cloud.driver.event.DefaultEventManager;
 import dev.sirius.cloud.protocol.connection.NetworkClient;
@@ -29,6 +31,7 @@ public final class RemoteCloudDriver implements CloudDriver {
     private final RemoteGroupProvider groups;
     private final RemotePlayerProvider players;
     private final RemoteNodeProvider node;
+    private final RemoteMessagingProvider messaging;
     private final EventManager events = new DefaultEventManager();
 
     public RemoteCloudDriver(String environment, NetworkClient client) {
@@ -38,6 +41,7 @@ public final class RemoteCloudDriver implements CloudDriver {
         this.groups = new RemoteGroupProvider(client);
         this.players = new RemotePlayerProvider(client);
         this.node = new RemoteNodeProvider(client);
+        this.messaging = new RemoteMessagingProvider(client);
     }
 
     @Override
@@ -58,6 +62,11 @@ public final class RemoteCloudDriver implements CloudDriver {
     @Override
     public NodeProvider node() {
         return node;
+    }
+
+    @Override
+    public MessagingProvider messaging() {
+        return messaging;
     }
 
     @Override
@@ -90,5 +99,10 @@ public final class RemoteCloudDriver implements CloudDriver {
 
     public void evictPlayer(UUID uniqueId) {
         players.evictPlayer(uniqueId);
+    }
+
+    /** Called by the owning process when the node delivers a channel message. */
+    public void deliverChannelMessage(ChannelMessage message) {
+        messaging.deliver(message);
     }
 }

@@ -46,8 +46,9 @@ val dist by tasks.registering(Copy::class) {
     val paperPlugin = project(":cloud-plugins:paper").tasks.named("shadowJar")
     val velocityPlugin = project(":cloud-plugins:velocity").tasks.named("shadowJar")
     val restModule = project(":cloud-modules:rest").tasks.named("jar")
+    val notifyModule = project(":cloud-modules:notify").tasks.named("jar")
 
-    dependsOn(nodeJar, wrapperJar, paperPlugin, velocityPlugin, restModule)
+    dependsOn(nodeJar, wrapperJar, paperPlugin, velocityPlugin, restModule, notifyModule)
 
     into(layout.buildDirectory.dir("dist"))
 
@@ -74,6 +75,10 @@ val dist by tasks.registering(Copy::class) {
     from(restModule) {
         into("node/modules")
         rename { "cloud-module-rest.jar" }
+    }
+    from(notifyModule) {
+        into("node/modules")
+        rename { "cloud-module-notify.jar" }
     }
     from("scripts") {
         into(".")

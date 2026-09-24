@@ -5,6 +5,7 @@ import dev.sirius.cloud.api.event.events.ServiceCreatedEvent;
 import dev.sirius.cloud.api.event.events.WrapperConnectedEvent;
 import dev.sirius.cloud.api.event.events.WrapperDisconnectedEvent;
 import dev.sirius.cloud.api.logging.CloudLogger;
+import dev.sirius.cloud.api.messaging.ChannelMessage;
 import dev.sirius.cloud.api.node.WrapperInfo;
 import dev.sirius.cloud.api.player.CloudPlayer;
 import dev.sirius.cloud.api.event.events.PlayerConnectEvent;
@@ -29,6 +30,7 @@ import dev.sirius.cloud.protocol.connection.PacketHandler;
 import dev.sirius.cloud.protocol.packet.ConnectionType;
 import dev.sirius.cloud.protocol.packet.Packet;
 import dev.sirius.cloud.protocol.packet.impl.AcknowledgePacket;
+import dev.sirius.cloud.protocol.packet.impl.ChannelMessagePacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleCommandPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleHistoryPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleLinePacket;
@@ -217,6 +219,19 @@ public final class NodePacketHandler implements PacketHandler {
             } else {
                 LOGGER.warn("Ignoring a service snapshot from non-wrapper {}", channel);
             }
+
+        } else if (packet instanceof ChannelMessagePacket message) {
+            // The source is stamped here from the authenticated connection and
+            // never taken from the sender, so a service cannot publish under
+            // another's name.
+            String source = channel.type() == ConnectionType.SERVICE && channel.name() != null
+                    ? channel.name()
+                    : "node";
+            message.sourceService(source);
+
+            serviceChannels.broadcastToServices(message, channel.serviceId());
+            driver.deliverChannelMessage(new ChannelMessage(
+                    message.channel(), message.payload(), source));
 
         } else if (packet instanceof ConsoleLinePacket line) {
             // Only reaches a console that asked for it; see AttachCommand.

@@ -1,6 +1,7 @@
 package dev.sirius.cloud.protocol.packet;
 
 import dev.sirius.cloud.protocol.packet.impl.AcknowledgePacket;
+import dev.sirius.cloud.protocol.packet.impl.ChannelMessagePacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleCommandPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleHistoryPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleLinePacket;
@@ -130,6 +131,9 @@ public final class PacketRegistry {
                 .register(0x45, PlayerMessagePacket.class, PlayerMessagePacket::new)
                 .register(0x46, PlayerKickPacket.class, PlayerKickPacket::new)
                 .register(0x47, PlayerListRequestPacket.class, PlayerListRequestPacket::new)
-                .register(0x48, PlayerListResponsePacket.class, PlayerListResponsePacket::new);
+                .register(0x48, PlayerListResponsePacket.class, PlayerListResponsePacket::new)
+
+                // 0x50-0x5F - cloud-wide messaging
+                .register(0x50, ChannelMessagePacket.class, ChannelMessagePacket::new);
     }
 }

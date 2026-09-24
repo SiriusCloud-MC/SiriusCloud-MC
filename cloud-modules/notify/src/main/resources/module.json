@@ -1,0 +1,8 @@
+{
+  "id": "notify",
+  "version": "1.0.0",
+  "main": "dev.sirius.cloud.module.notify.NotifyModule",
+  "apiVersion": "1.0.0",
+  "description": "Announces cloud events to staff in game",
+  "authors": ["Sirius"]
+}

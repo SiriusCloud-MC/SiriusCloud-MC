@@ -8,6 +8,7 @@ include("cloud-wrapper")
 include("cloud-plugins:paper")
 include("cloud-plugins:velocity")
 include("cloud-modules:rest")
+include("cloud-modules:notify")
 
 dependencyResolutionManagement {
     repositories {

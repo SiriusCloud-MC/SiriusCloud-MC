@@ -9,6 +9,11 @@ dependencies {
     implementation(project(":cloud-driver"))
 
     compileOnly(libs.paper.api)
+
+    // LuckPerms is an optional integration: present at compile time for the
+    // messenger, absent at runtime on servers that do not run it. Every touch
+    // of it is guarded, so the plugin works either way.
+    compileOnly(libs.luckperms.api)
 }
 
 tasks.shadowJar {

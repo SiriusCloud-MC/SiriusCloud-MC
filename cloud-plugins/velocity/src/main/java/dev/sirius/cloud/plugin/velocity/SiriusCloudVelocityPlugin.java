@@ -1,5 +1,7 @@
 package dev.sirius.cloud.plugin.velocity;
 
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.google.inject.Inject;
 import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.command.SimpleCommand;
@@ -19,17 +21,20 @@ import com.velocitypowered.api.proxy.server.ServerInfo;
 import com.velocitypowered.api.proxy.server.ServerPing;
 import dev.sirius.cloud.api.driver.CloudDriver;
 import dev.sirius.cloud.api.logging.CloudLogger;
+import dev.sirius.cloud.api.messaging.ChannelMessage;
 import dev.sirius.cloud.api.platform.Platform;
 import dev.sirius.cloud.api.player.CloudPlayer;
 import dev.sirius.cloud.api.service.ServiceInfo;
 import dev.sirius.cloud.api.service.ServiceState;
 import dev.sirius.cloud.driver.RemoteCloudDriver;
+import dev.sirius.cloud.plugin.velocity.luckperms.LuckPermsSupport;
 import dev.sirius.cloud.protocol.connection.NetworkChannel;
 import dev.sirius.cloud.protocol.connection.NetworkClient;
 import dev.sirius.cloud.protocol.connection.PacketHandler;
 import dev.sirius.cloud.protocol.packet.ConnectionType;
 import dev.sirius.cloud.protocol.packet.Packet;
 import dev.sirius.cloud.protocol.packet.PacketRegistry;
+import dev.sirius.cloud.protocol.packet.impl.ChannelMessagePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
@@ -86,6 +91,7 @@ public final class SiriusCloudVelocityPlugin {
 
     private ConnectionFile connection;
     private NetworkClient client;
+    private RemoteCloudDriver driver;
 
     /** Backends the node has told us about, by service id. */
     private final Map<UUID, Backend> backends = new ConcurrentHashMap<>();
@@ -133,10 +139,17 @@ public final class SiriusCloudVelocityPlugin {
                 proxy.getCommandManager().metaBuilder("hub").aliases("lobby", "l").build(),
                 new HubCommand());
 
+        proxy.getCommandManager().register(
+                proxy.getCommandManager().metaBuilder("cloud").aliases("siriuscloud", "sc").build(),
+                new CloudCommand());
+
         client = new NetworkClient(PacketRegistry.standard());
         client.connect(connection.nodeHost(), connection.nodePort(), new ProxyPacketHandler());
 
-        CloudDriver.bind(new RemoteCloudDriver("SERVICE", client));
+        driver = new RemoteCloudDriver("SERVICE", client);
+        CloudDriver.bind(driver);
+
+        CloudDriver.instance().messaging().subscribe(NOTIFY_CHANNEL, this::showNotification);
 
         configuredMaxPlayers = proxy.getConfiguration().getShowMaxPlayers();
 
@@ -146,6 +159,55 @@ public final class SiriusCloudVelocityPlugin {
 
         logger.info("Connecting to node at {}:{} as {}",
                 connection.nodeHost(), connection.nodePort(), connection.serviceName());
+
+        // Last, and deliberately: an optional integration must not be able to
+        // take the rest of initialisation down with it. Velocity has no
+        // loadbefore, so this may also land after LuckPerms has already
+        // resolved its messenger - LuckPermsSupport says what to do if so.
+        LuckPermsSupport.enable();
+    }
+
+    /** Must match the notify module's channel. */
+    private static final String NOTIFY_CHANNEL = "siriuscloud:notify";
+
+    /**
+     * Shows a cloud event to staff on the proxy.
+     *
+     * <p>Filtered here rather than on the node, which has no idea who holds a
+     * permission. Backends do the same for their own players, so somebody on a
+     * server sees it once and somebody sitting on the proxy still sees it.
+     */
+    private void showNotification(ChannelMessage message) {
+        JsonObject body;
+        try {
+            body = JsonParser.parseString(message.payload()).getAsJsonObject();
+        } catch (RuntimeException exception) {
+            return;
+        }
+
+        String permission = body.has("permission")
+                ? body.get("permission").getAsString() : "siriuscloud.notify";
+        String text = body.has("message") ? body.get("message").getAsString() : "";
+        if (text.isBlank()) {
+            return;
+        }
+
+        NamedTextColor colour = switch (body.has("kind") ? body.get("kind").getAsString() : "INFO") {
+            case "GOOD" -> NamedTextColor.GREEN;
+            case "WARN" -> NamedTextColor.YELLOW;
+            case "BAD" -> NamedTextColor.RED;
+            default -> NamedTextColor.GRAY;
+        };
+
+        Component line = Component.text("[Cloud] ", NamedTextColor.AQUA)
+                .append(Component.text(text, colour));
+
+        proxy.getAllPlayers().stream()
+                .filter(player -> player.hasPermission(permission))
+                .forEach(player -> player.sendMessage(line));
+        // The console should see these too: on a proxy-only setup it is the
+        // only place anyone is watching.
+        proxy.getConsoleCommandSource().sendMessage(line);
     }
 
     @Subscribe
@@ -421,6 +483,12 @@ public final class SiriusCloudVelocityPlugin {
 
         @Override
         public void onPacket(NetworkChannel channel, Packet packet) {
+            if (packet instanceof ChannelMessagePacket message) {
+                driver.deliverChannelMessage(new ChannelMessage(
+                        message.channel(), message.payload(), message.sourceService()));
+                return;
+            }
+
             if (packet instanceof HandshakeResponsePacket response) {
                 if (response.accepted()) {
                     channel.authenticated(true);

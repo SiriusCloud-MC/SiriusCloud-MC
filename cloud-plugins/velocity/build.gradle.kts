@@ -48,6 +48,9 @@ dependencies {
     implementation(project(":cloud-driver"))
 
     compileOnly(libs.velocity.api)
+
+    // Optional at runtime; see the Paper plugin's build file.
+    compileOnly(libs.luckperms.api)
     // Generates velocity-plugin.json from the @Plugin annotation.
     annotationProcessor(libs.velocity.api)
 }

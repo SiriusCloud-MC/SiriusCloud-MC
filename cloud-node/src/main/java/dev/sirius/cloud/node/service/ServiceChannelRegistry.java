@@ -47,6 +47,24 @@ public final class ServiceChannelRegistry {
         }
     }
 
+    /**
+     * Sends a packet to every connected service except one.
+     *
+     * <p>The exclusion is what stops a publisher receiving its own message
+     * back, which would make the ordinary "apply here, then tell everyone
+     * else" pattern apply twice on the originating server.
+     *
+     * @param exclude service not to send to, or null to send to all
+     */
+    public void broadcastToServices(Packet packet, UUID exclude) {
+        for (Map.Entry<UUID, NetworkChannel> entry : channels.entrySet()) {
+            if (exclude != null && exclude.equals(entry.getKey())) {
+                continue;
+            }
+            entry.getValue().send(packet);
+        }
+    }
+
     public Collection<UUID> connectedServices() {
         return List.copyOf(channels.keySet());
     }
