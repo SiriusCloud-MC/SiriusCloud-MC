@@ -169,7 +169,7 @@ public final class SiriusCloudVelocityPlugin {
         driver = new RemoteCloudDriver("SERVICE", client, connection.serviceId());
         CloudDriver.bind(driver);
 
-        client.connect(connection.nodeHost(), connection.nodePort(), new ProxyPacketHandler());
+        client.connect(connection.nodes(), new ProxyPacketHandler());
 
         CloudDriver.instance().messaging().subscribe(NOTIFY_CHANNEL, this::showNotification);
 

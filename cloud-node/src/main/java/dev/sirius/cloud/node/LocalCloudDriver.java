@@ -3,6 +3,7 @@ package dev.sirius.cloud.node;
 import dev.sirius.cloud.api.database.Database;
 import dev.sirius.cloud.api.driver.CloudDriver;
 import dev.sirius.cloud.api.network.NetworkProvider;
+import dev.sirius.cloud.node.cluster.ClusterMember;
 import dev.sirius.cloud.node.gateway.ProxyGateway;
 import dev.sirius.cloud.api.player.PlayerProfile;
 import dev.sirius.cloud.api.store.KeyValueStore;
@@ -98,6 +99,11 @@ public final class LocalCloudDriver implements CloudDriver {
         info.serviceCount(serviceRegistry.size());
         info.wrapperCount(wrapperRegistry.all().size());
         info.playerCount(playerRegistry.count());
+        ClusterMember member = cluster.get();
+        if (member != null) {
+            // Only the leader runs a driver, so this node is the leader.
+            info.cluster("leader", member.term());
+        }
         return info;
     }
 
@@ -251,6 +257,13 @@ public final class LocalCloudDriver implements CloudDriver {
         };
     }
 
+    private java.util.function.Supplier<ClusterMember> cluster = () -> null;
+
+    /** The cluster this node belongs to, if any, for describing its members. */
+    public void cluster(java.util.function.Supplier<ClusterMember> cluster) {
+        this.cluster = cluster;
+    }
+
     @Override
     public NodeProvider node() {
         return new NodeProvider() {
@@ -261,9 +274,29 @@ public final class LocalCloudDriver implements CloudDriver {
 
             @Override
             public CompletableFuture<Collection<NodeInfo>> nodes() {
-                // One entry until clustering exists. Shaped as a collection now
-                // so that adding peers later is not an API change.
-                return CompletableFuture.completedFuture(List.of(describeNode()));
+                ClusterMember member = cluster.get();
+                if (member == null) {
+                    return CompletableFuture.completedFuture(List.of(describeNode()));
+                }
+                // This node in full; the others as far as the cluster knows
+                // them, since their state lives in their own processes.
+                ClusterMember.Status status = member.status();
+                List<NodeInfo> nodes = new java.util.ArrayList<>();
+                for (ClusterMember.MemberStatus peer : status.members()) {
+                    NodeInfo info;
+                    if (peer.self()) {
+                        info = describeNode();
+                    } else {
+                        int colon = peer.clients().lastIndexOf(':');
+                        info = new NodeInfo(peer.name(), "unknown", peer.clients().substring(0, colon),
+                                Integer.parseInt(peer.clients().substring(colon + 1)), 0);
+                    }
+                    String role = peer.name().equalsIgnoreCase(status.leader()) ? "leader"
+                            : peer.connected() ? "follower" : "unreachable";
+                    info.cluster(role, status.term());
+                    nodes.add(info);
+                }
+                return CompletableFuture.completedFuture(nodes);
             }
 
             @Override

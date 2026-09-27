@@ -39,6 +39,11 @@ public interface DataBuf {
 
     DataBuf writeString(String value);
 
+    /** Raw bytes, length-prefixed. For file contents, which are not text. */
+    DataBuf writeBytes(byte[] value);
+
+    byte[] readBytes();
+
     String readString();
 
     DataBuf writeUniqueId(UUID value);

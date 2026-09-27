@@ -24,6 +24,7 @@ import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
 import java.util.LinkedHashMap;
+import dev.sirius.cloud.protocol.connection.NetworkClient;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -170,6 +171,13 @@ public final class ServiceProcess {
         return current != null && current.isAlive();
     }
 
+    private List<String> nodeEndpoints = List.of();
+
+    /** Every node address the wrapper knows, written into the service's connection file. */
+    public void nodeEndpoints(List<String> endpoints) {
+        this.nodeEndpoints = List.copyOf(endpoints);
+    }
+
     /** Lays out the working directory and spawns the JVM. */
     public void start(Path serverJar,
                       Path pluginJar,
@@ -251,6 +259,20 @@ public final class ServiceProcess {
         connection.put("token", token);
         connection.put("nodeHost", launcher.nodeHostFor(nodeHost));
         connection.put("nodePort", nodePort);
+
+        // Every node of a cluster, the current leader first, so the service
+        // can find the next leader if this one goes. Mapped like nodeHost, so
+        // a container reaches a node on this machine too.
+        java.util.LinkedHashSet<String> nodes = new java.util.LinkedHashSet<>();
+        nodes.add(NetworkClient.endpoint(launcher.nodeHostFor(nodeHost), nodePort));
+        for (String endpoint : nodeEndpoints) {
+            int colon = endpoint.lastIndexOf(':');
+            if (colon > 0) {
+                String host = endpoint.substring(0, colon).replace("[", "").replace("]", "");
+                nodes.add(NetworkClient.endpoint(launcher.nodeHostFor(host), Integer.parseInt(endpoint.substring(colon + 1))));
+            }
+        }
+        connection.put("nodes", List.copyOf(nodes));
 
         FileUtil.writeString(directory.resolve("cloud-connection.json"),
                 new GsonBuilder().setPrettyPrinting().create().toJson(connection));

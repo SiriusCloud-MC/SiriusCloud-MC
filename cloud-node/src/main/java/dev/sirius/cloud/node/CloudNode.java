@@ -18,6 +18,7 @@ import dev.sirius.cloud.node.command.CommandManager;
 import dev.sirius.cloud.node.command.commands.AttachCommand;
 import dev.sirius.cloud.node.command.commands.BackupCommand;
 import dev.sirius.cloud.node.command.commands.BroadcastCommand;
+import dev.sirius.cloud.node.command.commands.ClusterCommand;
 import dev.sirius.cloud.node.command.commands.EditCommand;
 import dev.sirius.cloud.node.command.commands.ExecuteCommand;
 import dev.sirius.cloud.node.command.commands.MaintenanceCommand;
@@ -64,6 +65,8 @@ import dev.sirius.cloud.node.setup.FirstRunSetup;
 import dev.sirius.cloud.node.wrapper.WrapperRegistry;
 import dev.sirius.cloud.protocol.connection.NetworkServer;
 import dev.sirius.cloud.protocol.packet.PacketRegistry;
+import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
+import dev.sirius.cloud.node.cluster.ClusterMember;
 import dev.sirius.cloud.protocol.packet.impl.ServiceAvailabilityPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceUpdatePacket;
 import dev.sirius.cloud.protocol.packet.impl.TemplateChangedPacket;
@@ -122,6 +125,15 @@ public final class CloudNode {
 
     private final AtomicBoolean shuttingDown = new AtomicBoolean();
 
+    /** Exit code asking the start scripts to start the node again, as a follower. */
+    public static final int RESTART_AS_FOLLOWER = 75;
+
+    private volatile ClusterMember cluster;
+    private NetworkServer standby;
+    private volatile boolean leading;
+    private volatile int exitCode;
+    private FirstRunSetup setup;
+
     private NodeConsole console;
     private final DirectoryLock directoryLock;
     private final Migrator migrator;
@@ -176,8 +188,8 @@ public final class CloudNode {
         groups.load();
 
         Path configFile = workingDirectory.resolve("config.json");
-        FirstRunSetup setup = new FirstRunSetup(console, groups, config, configFile);
-        registerCommands(setup);
+        setup = new FirstRunSetup(console, groups, config, configFile);
+        registerBaseCommands();
 
         // Offered once, then remembered either way. Tracked in the config
         // rather than inferred from "are there groups", so declining is not
@@ -186,6 +198,57 @@ public final class CloudNode {
             setup.runFirstRun();
             config.setupCompleted(true);
             JsonConfig.save(configFile, config);
+        }
+
+        Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "sirius-shutdown"));
+
+        if (config.cluster().enabled()) {
+            // A follower runs no control plane: it keeps a copy of the data,
+            // votes, and points clients at the leader. It becomes a full node
+            // only once elected, from the files the leader replicated to it.
+            cluster = new ClusterMember(config, workingDirectory, migrator.latest(), new ClusterMember.Listener() {
+                @Override
+                public void promoted(long term) {
+                    try {
+                        becomeLeader();
+                    } catch (Exception exception) {
+                        LOGGER.error("Could not start the control plane as leader", exception);
+                        stepDown("the control plane failed to start");
+                    }
+                }
+
+                @Override
+                public void demoted(String reason) {
+                    stepDown(reason);
+                }
+            });
+            startStandbyGateway();
+            cluster.start();
+        } else {
+            becomeLeader();
+        }
+
+        // Blocks this thread until the console exits.
+        console.run(this::shutdown);
+    }
+
+    /**
+     * Runs the control plane: the database, the driver, modules, the listener
+     * wrappers and services connect to, and the scheduling loops.
+     *
+     * <p>Straight away on a standalone node. In a cluster, when this node is
+     * elected - from files the previous leader replicated here, which is why
+     * migrations and groups are looked at again first. Running services are
+     * not started again: their wrappers reconnect and report them, and they
+     * are adopted exactly as after a node restart.
+     */
+    private synchronized void becomeLeader() throws Exception {
+        if (cluster != null) {
+            stopStandbyGateway();
+            migrator.run(false);
+            groups.load();
+            requirePortAvailable(config.bindAddress(), config.port());
+            LOGGER.info("Taking over as the cluster's control plane");
         }
 
         // After setup, which is where the database is chosen, and before the
@@ -284,6 +347,11 @@ public final class CloudNode {
                 config, serviceManager, services, groups, wrappers, events, console,
                 serviceChannels, players, playerManager, driver);
         packetHandler.onTemplateChanged(this::templateChanged);
+        driver.cluster(() -> cluster);
+        if (cluster != null) {
+            // Every client learns every node, so it can find the next leader.
+            packetHandler.clusterView(cluster::term, cluster::clientEndpoints);
+        }
         server.start(config.bindAddress(), config.port(), packetHandler);
 
         LOGGER.info("Services connect back to {}:{}", config.connectAddress(), config.port());
@@ -311,10 +379,101 @@ public final class CloudNode {
         scheduler.scheduleWithFixedDelay(gateway::tick, 1, 1, TimeUnit.SECONDS);
         scheduler.scheduleWithFixedDelay(backups::tick, 30, 30, TimeUnit.SECONDS);
 
-        Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "sirius-shutdown"));
+        registerLeaderCommands();
+        leading = true;
+    }
 
-        // Blocks this thread until the console exits.
-        console.run(this::shutdown);
+    // ------------------------------------------------------------- cluster
+
+    /**
+     * The client port on a follower: anyone connecting is pointed at the
+     * leader, or asked to retry while an election is under way. Wrappers and
+     * services follow that on their own.
+     */
+    private void startStandbyGateway() throws InterruptedException {
+        standby = new NetworkServer(PacketRegistry.standard());
+        standby.start(config.bindAddress(), config.port(), new dev.sirius.cloud.protocol.connection.PacketHandler() {
+            @Override
+            public void onPacket(dev.sirius.cloud.protocol.connection.NetworkChannel channel,
+                                 dev.sirius.cloud.protocol.packet.Packet packet) {
+                if (!(packet instanceof dev.sirius.cloud.protocol.packet.impl.HandshakePacket)) {
+                    return;
+                }
+                java.util.List<String> endpoints = cluster.clientEndpoints();
+                channel.send(cluster.leaderClientEndpoint()
+                        .map(leader -> HandshakeResponsePacket.redirect(leader, endpoints))
+                        .orElseGet(() -> HandshakeResponsePacket.retryLater(
+                                "the cluster is electing a leader", endpoints)));
+                channel.close();
+            }
+        });
+    }
+
+    private synchronized void stopStandbyGateway() {
+        if (standby != null) {
+            standby.close();
+            standby = null;
+        }
+    }
+
+    /**
+     * Leadership is gone - the majority is out of reach, or another node won
+     * a newer term. The control plane stops at once, without touching a
+     * single service: they keep running, and their wrappers reconnect to
+     * whichever node leads next.
+     *
+     * <p>The process then exits with {@link #RESTART_AS_FOLLOWER}, and the
+     * start scripts start it again as a follower. Starting afresh, rather
+     * than resetting every registry in place, is what guarantees nothing of
+     * the old leadership lingers.
+     */
+    private void stepDown(String reason) {
+        if (!shuttingDown.compareAndSet(false, true)) {
+            return;
+        }
+        LOGGER.warn("Stepping down as leader: {}", reason);
+        LOGGER.warn("Services keep running. This node restarts as a follower.");
+        haltControlPlane();
+        if (cluster != null) {
+            cluster.close();
+        }
+        if (console != null) {
+            console.close();
+        }
+        directoryLock.close();
+        exitCode = RESTART_AS_FOLLOWER;
+        Thread.ofPlatform().name("sirius-restart").start(() -> System.exit(RESTART_AS_FOLLOWER));
+    }
+
+    /** What the process should exit with once {@link #start()} returns. */
+    public int exitCode() {
+        return exitCode;
+    }
+
+    /** Stops acting as the control plane, leaving every service running. */
+    private void haltControlPlane() {
+        leading = false;
+        scheduler.shutdownNow();
+        stopStandbyGateway();
+        if (modules != null) {
+            modules.disableAll();
+        }
+        // Wrappers and services lose this connection and go looking for the
+        // next leader; nothing on their side stops.
+        server.close();
+        if (profiles != null) {
+            profiles.flushAll();
+        }
+        if (store != null) {
+            store.flush();
+        }
+        if (database != null) {
+            database.close();
+        }
+    }
+
+    public ClusterMember cluster() {
+        return cluster;
     }
 
     /**
@@ -371,6 +530,25 @@ public final class CloudNode {
             return;
         }
 
+        // A clustered node leaving is not the network going down: services
+        // keep running and another node takes over. That holds from the moment
+        // clustering is configured, so restarting into cluster mode after
+        // 'cluster init' does not take the network down either.
+        if (cluster != null || config.cluster().enabled()) {
+            LOGGER.info("Leaving the cluster. Services keep running; another node takes over.");
+            haltControlPlane();
+            if (cluster != null) {
+                cluster.handOver();
+                cluster.close();
+            }
+            if (console != null) {
+                console.close();
+            }
+            directoryLock.close();
+            LOGGER.info("Goodbye.");
+            return;
+        }
+
         LOGGER.info("Shutting down...");
         scheduler.shutdownNow();
 
@@ -421,8 +599,16 @@ public final class CloudNode {
         LOGGER.info("Goodbye.");
     }
 
-    private void registerCommands(FirstRunSetup setup) {
+    /** Commands that make sense on any node, follower or leader. */
+    private void registerBaseCommands() {
         commands.register(new HelpCommand(commands));
+        commands.register(new MigrateCommand(migrator));
+        commands.register(new ClusterCommand(config, workingDirectory, console, () -> cluster));
+        commands.register(new ShutdownCommand(this));
+    }
+
+    /** Commands that act on the network, registered once this node runs the control plane. */
+    private void registerLeaderCommands() {
         commands.register(new SetupCommand(setup));
         commands.register(new ServicesCommand(services));
         commands.register(new PlayersCommand(players));
@@ -441,8 +627,6 @@ public final class CloudNode {
         commands.register(new AttachCommand(services, serviceManager, console));
         commands.register(new VersionsCommand(versionCatalogs, config.minimumPaperVersion()));
         commands.register(new InfoCommand(config, services, wrappers));
-        commands.register(new MigrateCommand(migrator));
-        commands.register(new ShutdownCommand(this));
     }
 
     private void printBanner() {

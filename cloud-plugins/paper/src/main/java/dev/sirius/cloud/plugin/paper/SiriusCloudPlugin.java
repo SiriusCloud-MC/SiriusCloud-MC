@@ -105,7 +105,7 @@ public final class SiriusCloudPlugin extends JavaPlugin implements Listener {
         driver = new RemoteCloudDriver("SERVICE", client, connection.serviceId());
         CloudDriver.bind(driver);
 
-        client.connect(connection.nodeHost(), connection.nodePort(), new ServicePacketHandler());
+        client.connect(connection.nodes(), new ServicePacketHandler());
 
         CloudNotifications.register();
 

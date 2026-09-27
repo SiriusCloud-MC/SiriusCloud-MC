@@ -475,6 +475,20 @@ public final class NodePacketHandler implements PacketHandler {
                 || packet instanceof ChannelMessagePacket;
     }
 
+    private java.util.function.LongSupplier clusterTerm = () -> HandshakeResponsePacket.STANDALONE;
+    private java.util.function.Supplier<List<String>> clusterEndpoints = List::of;
+
+    /**
+     * In a cluster: the term and every node's address go to each client that
+     * connects, so it can tell a stale leader from the real one and find the
+     * next leader by itself.
+     */
+    public void clusterView(java.util.function.LongSupplier term,
+                            java.util.function.Supplier<List<String>> endpoints) {
+        this.clusterTerm = term;
+        this.clusterEndpoints = endpoints;
+    }
+
     private void handleHandshake(NetworkChannel channel, HandshakePacket handshake) {
         if (channel.authenticated()) {
             channel.close();
@@ -523,7 +537,9 @@ public final class NodePacketHandler implements PacketHandler {
             }
         }
 
-        channel.send(new HandshakeResponsePacket(accepted, message));
+        channel.send(accepted
+                ? new HandshakeResponsePacket(true, message, clusterTerm.getAsLong(), clusterEndpoints.get(), "", false)
+                : new HandshakeResponsePacket(false, message));
 
         if (!accepted) {
             LOGGER.warn("Rejected {} handshake from {}: {}",

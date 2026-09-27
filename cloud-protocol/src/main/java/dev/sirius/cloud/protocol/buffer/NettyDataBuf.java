@@ -123,6 +123,24 @@ public final class NettyDataBuf implements DataBuf {
     }
 
     @Override
+    public DataBuf writeBytes(byte[] value) {
+        writeVarInt(value.length);
+        buf.writeBytes(value);
+        return this;
+    }
+
+    @Override
+    public byte[] readBytes() {
+        int length = readVarInt();
+        if (length < 0 || length > buf.readableBytes()) {
+            throw new IllegalStateException("Byte array length " + length + " exceeds remaining " + buf.readableBytes());
+        }
+        byte[] bytes = new byte[length];
+        buf.readBytes(bytes);
+        return bytes;
+    }
+
+    @Override
     public String readString() {
         int length = readVarInt();
         if (length < 0 || length > MAX_STRING_LENGTH) {

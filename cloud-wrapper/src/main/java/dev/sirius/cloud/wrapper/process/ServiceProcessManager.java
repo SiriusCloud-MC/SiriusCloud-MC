@@ -120,6 +120,13 @@ public final class ServiceProcessManager {
      * I/O — an HTTP download, a recursive copy, a process spawn — and it is
      * called from a Netty event loop that must not be held up.
      */
+    private volatile java.util.function.Supplier<List<String>> nodeEndpoints = List::of;
+
+    /** Where to learn every node's address, for services to fail over between. */
+    public void nodeEndpoints(java.util.function.Supplier<List<String>> endpoints) {
+        this.nodeEndpoints = endpoints;
+    }
+
     public void start(ServiceInfo info, ServiceGroup group, String token,
                       String nodeHost, int nodePort, String forwardingSecret) {
         Thread.ofVirtual().name("start-" + info.name()).start(() -> {
@@ -168,6 +175,7 @@ public final class ServiceProcessManager {
                 }
 
                 processes.put(info.uniqueId(), process);
+                process.nodeEndpoints(nodeEndpoints.get());
                 process.start(serverJar, proxy ? proxyPluginJar : serverPluginJar, mods,
                         templates, token, nodeHost, nodePort, forwardingSecret);
 

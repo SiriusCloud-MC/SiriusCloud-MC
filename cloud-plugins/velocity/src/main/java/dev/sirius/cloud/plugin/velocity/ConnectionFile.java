@@ -25,6 +25,9 @@ public final class ConnectionFile {
     private String nodeHost;
     private int nodePort;
 
+    /** Every node of a cluster, {@code host:port}, for failing over. Absent from older wrappers. */
+    private java.util.List<String> nodes;
+
     public static ConnectionFile read(Path path) throws IOException {
         try (Reader reader = Files.newBufferedReader(path, StandardCharsets.UTF_8)) {
             ConnectionFile file = new Gson().fromJson(reader, ConnectionFile.class);
@@ -57,5 +60,13 @@ public final class ConnectionFile {
 
     public int nodePort() {
         return nodePort;
+    }
+
+    /** Where to connect: every node known when this service started, or just the one. */
+    public java.util.List<String> nodes() {
+        if (nodes == null || nodes.isEmpty()) {
+            return java.util.List.of(dev.sirius.cloud.protocol.connection.NetworkClient.endpoint(nodeHost, nodePort));
+        }
+        return nodes;
     }
 }

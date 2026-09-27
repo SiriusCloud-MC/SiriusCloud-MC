@@ -10,5 +10,8 @@ public enum ConnectionType {
     SERVICE,
 
     /** An external tool or module. Authenticates with the shared secret. */
-    API
+    API,
+
+    /** Another node of the same cluster. Authenticates with the cluster secret, on the cluster port. */
+    NODE
 }

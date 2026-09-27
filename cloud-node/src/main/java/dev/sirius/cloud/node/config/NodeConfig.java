@@ -1,5 +1,10 @@
 package dev.sirius.cloud.node.config;
 
+import com.google.gson.Gson;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+
+import java.util.List;
 import java.util.UUID;
 
 /** {@code node/config.json}. */
@@ -78,6 +83,76 @@ public final class NodeConfig {
 
     /** Persistent storage; see {@link DatabaseSettings}. */
     private DatabaseSettings database = new DatabaseSettings();
+
+    /** Running several nodes as one; see {@link ClusterSettings}. */
+    private ClusterSettings cluster = new ClusterSettings();
+
+    /**
+     * Settings that describe the network rather than this machine, so every
+     * node of a cluster must hold the same values. The leader replicates
+     * these; name, addresses and ports stay each node's own.
+     */
+    private static final List<String> SHARED = List.of(
+            "secret", "forwardingSecret", "apiSecret", "apiReadOnly", "maxMemory", "minimumPaperVersion",
+            "database");
+
+    public ClusterSettings cluster() {
+        if (cluster == null) {
+            cluster = new ClusterSettings();
+        }
+        return cluster;
+    }
+
+    /** The shared settings as the leader sends them. See {@link #SHARED}. */
+    public JsonObject sharedSettings(Gson gson) {
+        forwardingSecret();
+        apiSecret();
+        JsonObject all = gson.toJsonTree(this).getAsJsonObject();
+        JsonObject shared = new JsonObject();
+        for (String key : SHARED) {
+            if (all.has(key)) {
+                shared.add(key, all.get(key));
+            }
+        }
+        JsonObject clusterShared = new JsonObject();
+        clusterShared.addProperty("secret", cluster().secret());
+        clusterShared.add("members", gson.toJsonTree(cluster().members()));
+        shared.add("cluster", clusterShared);
+        return shared;
+    }
+
+    /** Takes the leader's shared settings, keeping this node's own. */
+    public void adoptShared(JsonObject shared, Gson gson) {
+        NodeConfig incoming = gson.fromJson(shared, NodeConfig.class);
+        if (shared.has("secret")) {
+            secret = incoming.secret;
+        }
+        if (shared.has("forwardingSecret")) {
+            forwardingSecret = incoming.forwardingSecret;
+        }
+        if (shared.has("apiSecret")) {
+            apiSecret = incoming.apiSecret;
+        }
+        if (shared.has("apiReadOnly")) {
+            apiReadOnly = incoming.apiReadOnly;
+        }
+        if (shared.has("maxMemory")) {
+            maxMemory = incoming.maxMemory;
+        }
+        if (shared.has("minimumPaperVersion")) {
+            minimumPaperVersion = incoming.minimumPaperVersion;
+        }
+        if (shared.has("database")) {
+            database = incoming.database;
+        }
+        JsonElement clusterShared = shared.get("cluster");
+        if (clusterShared != null && clusterShared.isJsonObject()) {
+            ClusterSettings parsed = gson.fromJson(clusterShared, ClusterSettings.class);
+            cluster().secret(parsed.secret());
+            cluster().members().clear();
+            cluster().members().addAll(parsed.members());
+        }
+    }
 
     public DatabaseSettings database() {
         if (database == null) {

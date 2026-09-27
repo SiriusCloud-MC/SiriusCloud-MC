@@ -26,6 +26,12 @@ public final class NodeInfo {
 
     private long startedAt;
 
+    /** {@code standalone}, or in a cluster {@code leader}, {@code follower} or {@code unreachable}. */
+    private String role = "standalone";
+
+    /** The cluster term this node knows, or -1 outside a cluster. */
+    private long term = -1;
+
     /** Required by the JSON codec. */
     @SuppressWarnings("unused")
     NodeInfo() {
@@ -41,6 +47,19 @@ public final class NodeInfo {
 
     public String name() {
         return name;
+    }
+
+    public String role() {
+        return role == null ? "standalone" : role;
+    }
+
+    public long term() {
+        return term;
+    }
+
+    public void cluster(String role, long term) {
+        this.role = role;
+        this.term = term;
     }
 
     public String platform() {

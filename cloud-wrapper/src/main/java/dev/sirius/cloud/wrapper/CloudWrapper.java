@@ -191,7 +191,18 @@ public final class CloudWrapper {
                 workingDirectory.resolve("local").resolve("backups"), processes, client::send);
         handler.onBackupRequest(request -> backups.backup(request.serviceId(), request.keep()));
 
-        client.connect(config.nodeHost(), config.nodePort(), handler);
+        // The configured node first, then every node a cluster has told us
+        // about, remembered across restarts: a wrapper started while its
+        // configured node is down still finds the cluster's leader.
+        ClusterMemory memory = ClusterMemory.load(workingDirectory.resolve("local").resolve("cluster.json"));
+        java.util.LinkedHashSet<String> nodes = new java.util.LinkedHashSet<>();
+        nodes.add(NetworkClient.endpoint(config.nodeHost(), config.nodePort()));
+        nodes.addAll(memory.endpoints());
+        client.highestTerm(memory.term());
+        client.onEndpoints(memory::endpoints);
+        client.onTerm(memory::term);
+        processes.nodeEndpoints(client::endpoints);
+        client.connect(nodes, handler);
 
         CloudDriver.bind(new RemoteCloudDriver("WRAPPER", client));
 
@@ -200,7 +211,11 @@ public final class CloudWrapper {
 
         Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "sirius-wrapper-shutdown"));
 
-        LOGGER.info("Connecting to node at {}:{}", config.nodeHost(), config.nodePort());
+        if (nodes.size() > 1) {
+            LOGGER.info("Connecting to the cluster's leader, via {} known node(s)", nodes.size());
+        } else {
+            LOGGER.info("Connecting to node at {}:{}", config.nodeHost(), config.nodePort());
+        }
 
         // The wrapper has no console of its own; it idles until it is stopped.
         shutdownLatch.await();

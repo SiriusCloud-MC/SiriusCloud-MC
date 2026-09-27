@@ -12,8 +12,11 @@ public final class NodeBootstrap {
         // whatever the launcher script sets it to.
         Path workingDirectory = Path.of(args.length > 0 ? args[0] : "").toAbsolutePath().normalize();
 
+        int exitCode = 0;
         try {
-            new CloudNode(workingDirectory).start();
+            CloudNode node = new CloudNode(workingDirectory);
+            node.start();
+            exitCode = node.exitCode();
         } catch (java.nio.channels.OverlappingFileLockException | java.io.IOException exception) {
             // Almost always "already running here" - a stack trace would bury
             // a message the operator can act on directly.
@@ -23,7 +26,7 @@ public final class NodeBootstrap {
             CloudLogger.of("Bootstrap").error("The node failed to start", exception);
             System.exit(1);
         }
-        System.exit(0);
+        System.exit(exitCode);
     }
 
     private NodeBootstrap() {

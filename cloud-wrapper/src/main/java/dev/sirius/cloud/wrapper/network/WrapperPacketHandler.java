@@ -49,7 +49,8 @@ public final class WrapperPacketHandler implements PacketHandler {
 
     @Override
     public void onConnect(NetworkChannel channel) {
-        LOGGER.info("Connected to the node, authenticating as '{}'", config.name());
+        // Debug: in a cluster this may be a follower that only points us on.
+        LOGGER.debug("Connected to {}, authenticating as '{}'", channel.remoteAddress(), config.name());
         channel.send(new HandshakePacket(
                 ConnectionType.WRAPPER,
                 config.name(),
@@ -119,6 +120,10 @@ public final class WrapperPacketHandler implements PacketHandler {
     @Override
     public void onDisconnect(NetworkChannel channel) {
         connectionStateSink.accept(false);
+        if (!channel.authenticated()) {
+            // Never accepted: a follower's redirect, or a refusal logged elsewhere.
+            return;
+        }
         // Services keep running: losing the control connection is not a reason
         // to disconnect players. The client reconnects on its own.
         LOGGER.warn("Lost the node connection, {} service(s) still running", processes.runningCount());

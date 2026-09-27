@@ -57,6 +57,17 @@ public final class FirstRunSetup {
         console.print("  Nothing here is permanent - everything lands in node/config.json");
         console.print("  and node/groups/, and Enter accepts the suggested value.");
 
+        // Asked first: a node joining a cluster takes its memory budget,
+        // database and groups from the leader, so none of that is asked.
+        console.print("");
+        if (console.confirm("Is this node joining an existing SiriusCloud cluster?", false)) {
+            console.heading("Node");
+            askIdentity();
+            JsonConfig.save(configFile, config);
+            new ClusterSetup(console, config, configFile.getParent()).join();
+            return;
+        }
+
         configureNode(true);
 
         if (groups.isEmpty()) {
@@ -137,11 +148,7 @@ public final class FirstRunSetup {
                 "How much RAM may this node use for services, in MB", suggested, 256, 1024 * 1024));
 
         console.print("");
-        config.port(console.askInt("Port wrappers and services connect to", config.port(), 1, 65535));
-        config.bindAddress(console.ask(
-                "Address to listen on (0.0.0.0 accepts remote wrappers)", config.bindAddress()));
-        config.connectAddress(console.ask(
-                "Address wrappers should dial back (this machine's IP if remote)", config.connectAddress()));
+        askAddresses();
 
         console.print("");
         config.minimumPaperVersion(console.ask(
@@ -158,6 +165,21 @@ public final class FirstRunSetup {
         if (!firstRun) {
             LOGGER.warn("Address and port changes take effect when the node restarts.");
         }
+    }
+
+    /** What is this node's own in a cluster: its name and where it is reached. */
+    private void askIdentity() {
+        config.nodeName(console.ask("Name for this node (unique in the cluster)", config.nodeName()));
+        console.print("");
+        askAddresses();
+    }
+
+    private void askAddresses() {
+        config.port(console.askInt("Port wrappers and services connect to", config.port(), 1, 65535));
+        config.bindAddress(console.ask(
+                "Address to listen on (0.0.0.0 accepts remote wrappers)", config.bindAddress()));
+        config.connectAddress(console.ask(
+                "Address wrappers should dial back (this machine's IP if remote)", config.connectAddress()));
     }
 
     /**

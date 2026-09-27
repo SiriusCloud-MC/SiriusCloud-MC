@@ -11,6 +11,7 @@ Runs on **Linux and Windows**.
 | [Architecture](#architecture) | what the pieces are and why |
 | [Building](#building) and [Running](#running) | standing one up |
 | [Updating](#updating) | new versions, and migrating your files |
+| [Clustering](#clustering) | several nodes, one leader, failover |
 | [Service consoles](#service-consoles) | `attach`, and why crashes are special |
 | [The proxy](#the-proxy) | dynamic registration, slots, forwarding |
 | [Players](#players) | the cloud-wide player layer |
@@ -258,6 +259,7 @@ sirius@node> stop Lobby-1
 | `versions [paper\|purpur\|folia\|fabric\|velocity] [--all]` | Versions available to groups |
 | `info` | Node status and connected wrappers |
 | `migrate` | Data version, migration history and backups |
+| `cluster [status\|init\|join\|add\|remove\|promote]` | Runs several nodes as one; see [Clustering](#clustering) |
 | `shutdown` | Stops everything, then the node |
 
 ---
@@ -304,6 +306,135 @@ migration applied and when, and where the backups are. The version is kept in
 number and add it to the end of `NodeMigrations` or `WrapperMigrations`. Change
 files only through the `MigrationContext` you are given, which does the backups
 and the rollback. Never renumber or remove one that has shipped.
+
+---
+
+## Clustering
+
+Several nodes can run as one: one leads and runs the control plane, the others
+keep a live copy of its data, and if the leader dies one of them takes over.
+Services keep running throughout. Their wrappers and plugins find the new
+leader on their own, and it adopts them exactly as a restarted node would.
+
+```
+ node-a (leader)  ──replicates──►  node-b (follower)
+       │          ──replicates──►  node-c (follower)
+       │
+   wrappers, servers, proxies: connected to the leader, and know all three
+```
+
+### Setting one up
+
+**1. On the node you have now**, which keeps its groups and data:
+
+```
+sirius@node> cluster init
+```
+
+It asks for the address the other nodes reach it on and a port for traffic
+between nodes (default: this node's port + 1), prints a cluster secret, and
+asks you to restart the node. Services keep running while it restarts.
+
+**2. On each new node**, answer yes to the first question of first-time setup,
+*Is this node joining an existing SiriusCloud cluster?*, and enter the secret.
+An existing node can join with `cluster join`, which replaces its own groups and
+data with the cluster's. Start it, and it prints the one line to run next:
+
+```
+Waiting to be added to a cluster. On its leader, run: cluster add node-b 10.0.0.2:1421 10.0.0.2:1420
+```
+
+**3. On the leader**, run that line. The new node receives the groups, every
+module's data, the database (if it is JSON files) and the shared settings, and
+from then on every change as it happens.
+
+```
+sirius@node> cluster status
+This node : node-a (leader)
+Leader    : node-a   term 1
+Data      : revision 42
+Majority  : 2 of 3
+Members   :
+  node-a   10.0.0.1:1421   clients 10.0.0.1:1420   this node
+  node-b   10.0.0.2:1421   clients 10.0.0.2:1420   connected, heard 120ms ago, revision 42
+  node-c   10.0.0.3:1421   clients 10.0.0.3:1420   connected, heard 120ms ago, revision 42
+```
+
+| Command | What it does |
+|---|---|
+| `cluster` | Status: roles, term, who is reachable, how up to date each node is |
+| `cluster init` | Starts a cluster with this node as its first member |
+| `cluster join` | Makes this node join a cluster when it next starts |
+| `cluster add <name> <cluster addr> <client addr>` | On the leader: adds a member (it must be running) |
+| `cluster remove <name>` | On the leader: removes a member |
+| `cluster promote` | Makes this node leader without a majority, see below |
+
+### How many nodes
+
+A leader needs a **majority** of the members behind it: 2 of 3, 3 of 5. That is
+what makes two leaders impossible, since two majorities always share a node.
+It also means:
+
+| Members | Survives losing |
+|---|---|
+| 1 | nothing (a normal node) |
+| 2 | nothing automatically: each needs the other |
+| 3 | 1 node |
+| 5 | 2 nodes |
+
+**Use three for automatic failover.** With two, if one dies the other waits;
+`cluster promote` on the survivor makes it lead anyway. Only do that when the
+other really is down: if it is only cut off, both would be running services.
+
+### What it takes care of
+
+| | |
+|---|---|
+| **Failover** | A dead leader is replaced within about 4–6 seconds, and wrappers reconnect a few seconds after that. Tested by killing the leader outright. |
+| **No split brain** | A leader that loses contact with the majority stops within 3 seconds, before the others can have elected a replacement, and restarts as a follower. |
+| **Stale leaders are ignored** | Every client remembers the newest term it has seen and refuses a node with an older one, so a leader that was replaced cannot give orders. |
+| **A flaky node cannot disrupt** | A node that is merely cut off cannot win an election, so it cannot unseat a healthy leader when it comes back. |
+| **Only up-to-date nodes lead** | A node only votes for a candidate whose data is at least as new as its own, and whose build can read it. |
+| **Clean hand-over** | `shutdown` on the leader hands over to the most up-to-date follower at once, rather than waiting out a timeout. |
+
+### What is replicated
+
+`groups/`, every module's folder in `modules/`, `local/database/`,
+`local/store.json` and the data version. Also the settings that describe the
+network rather than one machine: the secrets, the memory budget, the database
+settings and the member list. A change reaches the followers about a second
+after it is saved; the key-value store saves every 5 seconds.
+
+Not replicated: jars (each node's program, updated per node), and each node's
+name, addresses and ports. Writes are not held until followers confirm them,
+so a leader that crashes can take its last second or so of changes with it.
+With a real database (MySQL, PostgreSQL, MongoDB) every node uses the same
+one and nothing there is lost; that is the recommended setup for a cluster.
+
+### Good to know
+
+- **In a cluster, `shutdown` leaves the cluster, not the network.** Services
+  keep running and another node takes over. To take everything down, stop the
+  wrappers.
+- **Updating a cluster:** update and restart the followers one at a time, then
+  the leader, which hands over as it goes. Nodes only vote for a candidate on a
+  build at least as new as their own, so once the followers are updated the
+  next leader is always an updated one. The new leader migrates the files as
+  it takes over.
+- **Use the start scripts.** A leader that has to step down exits with code
+  75, and `start-node.sh` / `start-node.bat` start it again as a follower.
+  Started any other way, it stays stopped until you start it.
+- **`connectAddress` must be reachable** from every wrapper, since wrappers are
+  handed every node's address. `127.0.0.1` only works if everything runs on
+  one machine.
+- **Modules, and with them the REST API and panel, run on the leader.** Their
+  address moves with the leader.
+- **Servers started before clustering** only know the one node they were
+  started with, and reconnect to it alone. Anything started afterwards knows
+  every node.
+- Each node keeps its own term, vote and data revision in
+  `local/cluster/state.json`; each wrapper keeps the nodes and the newest term
+  it has seen in `local/cluster.json`. Deleting a wrapper's file is safe.
 
 ---
 
@@ -1133,11 +1264,13 @@ registered under its id.
 | **4: Modules** | Module loader ✅, REST API ✅, web panel ✅, in-game commands ✅, notifications ✅, LuckPerms ✅, permissions ✅ · sign walls, NPCs |
 | **4b: Operations** ✅ | Autoscaling, rolling restarts and rollouts, start timeouts, health metrics, backups, Purpur/Folia/Fabric, Docker isolation |
 | **4c: Network** ✅ | Databases, player profiles, key-value store, maintenance and display, parties, friends, messages, bans and mutes, matchmaking, Prometheus, Discord |
-| **5: Scale** | Node clustering, leader election, state replication |
+| **5: Scale** ✅ | Node clustering, leader election, state replication, failover |
 
-None of milestones 2–4 need core changes: the event bus and the module loader
-are the extension points, and the protocol was designed multi-node from the
-start so milestone 5 does not require rewriting it.
+None of milestones 2–4 needed core changes: the event bus and the module loader
+are the extension points. Milestone 5 did not need a protocol rewrite either:
+it added one message type between nodes and a few fields to the handshake, and
+failover reuses what a node restart already did, which is adopt the services
+its wrappers report.
 
 The REST API is the first module and deliberately so: it uses nothing but
 `CloudDriver`, which makes it a standing check that the module contract is

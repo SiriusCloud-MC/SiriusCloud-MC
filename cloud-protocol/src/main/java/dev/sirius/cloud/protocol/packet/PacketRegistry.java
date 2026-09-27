@@ -2,6 +2,7 @@ package dev.sirius.cloud.protocol.packet;
 
 import dev.sirius.cloud.protocol.packet.impl.AcknowledgePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChannelMessagePacket;
+import dev.sirius.cloud.protocol.packet.impl.ClusterPacket;
 import dev.sirius.cloud.protocol.packet.impl.BackupResultPacket;
 import dev.sirius.cloud.protocol.packet.impl.BackupRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceMetricsPacket;
@@ -178,6 +179,9 @@ public final class PacketRegistry {
                 .register(0x74, LoginVerdictPacket.class, LoginVerdictPacket::new)
                 .register(0x75, ProxyDisplayPacket.class, ProxyDisplayPacket::new)
                 .register(0x76, ChatRestrictionsPacket.class, ChatRestrictionsPacket::new)
-                .register(0x77, ChatRestrictionRequestPacket.class, ChatRestrictionRequestPacket::new);
+                .register(0x77, ChatRestrictionRequestPacket.class, ChatRestrictionRequestPacket::new)
+
+                // 0x80 - node to node, on the cluster port
+                .register(0x80, ClusterPacket.class, ClusterPacket::new);
     }
 }
