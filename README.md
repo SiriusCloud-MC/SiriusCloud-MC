@@ -13,8 +13,12 @@ Runs on **Linux and Windows**.
 | [Service consoles](#service-consoles) | `attach`, and why crashes are special |
 | [The proxy](#the-proxy) | dynamic registration, slots, forwarding |
 | [Players](#players) | the cloud-wide player layer |
+| [Scaling and restarts](#scaling-and-restarts) | autoscaling, rolling restarts, rollouts |
+| [Server software](#server-software), [Isolation](#isolation), [Backups](#backups) | Purpur, Folia, Fabric; Docker; world backups |
+| [Persistence](#persistence) | databases, player profiles, key-value store |
 | [The API and the panel](#the-api-and-the-panel) | HTTP and the web panel |
 | [In game](#in-game) | `/cloud` and notifications |
+| [Network features](#network-features) | maintenance, parties, friends, bans, queues, metrics, Discord |
 | [LuckPerms](#luckperms) and [Permissions](#permissions) | pick one |
 
 | | Java |
@@ -239,6 +243,8 @@ sirius@node> stop Lobby-1
 | `start <group> [count]` | Starts services |
 | `stop <service\|group\|all> [--force]` | Graceful stop; `--force` kills |
 | `restart <service> [--force]` | Stops it and starts a replacement of its group |
+| `rollout [<group> [cancel]]` | Rolling restart of a group, or the status of running ones |
+| `backup <service>` | Backs up a running service now |
 | `edit <group> <field> <value>` | Changes a group setting without editing JSON |
 | `maintenance <group> [on\|off]` | Stops the node provisioning a group, or resumes |
 | `reload` | Re-reads `node/groups/` from disk |
@@ -248,7 +254,7 @@ sirius@node> stop Lobby-1
 | `broadcast <message>` | Message every player on every proxy |
 | `exec <service> <command>` | Runs a single command inside a service |
 | `attach <service>` | Opens that service's console (see below) |
-| `versions [paper\|velocity] [--all]` | Versions available to groups |
+| `versions [paper\|purpur\|folia\|fabric\|velocity] [--all]` | Versions available to groups |
 | `info` | Node status and connected wrappers |
 | `shutdown` | Stops everything, then the node |
 
@@ -494,6 +500,156 @@ several Minecraft releases may span their minimum Java versions too.
 
 ---
 
+## Scaling and restarts
+
+Every group scales between `minServiceCount` and `maxServiceCount` on its own.
+The whole policy lives in the group file, and all of it is editable live with
+`edit <group> <field> <value>`:
+
+```json
+{
+  "name": "BedWars",
+  "minServiceCount": 1,
+  "maxServiceCount": 10,
+  "startTimeoutSeconds": 180,
+  "autoscale": { "enabled": true, "scaleUpAtPercent": 80, "scaleDownAfterEmptySeconds": 300 },
+  "maxUptimeMinutes": 0,
+  "rolloutOnTemplateChange": true
+}
+```
+
+| Behaviour | How it works |
+|---|---|
+| **Scale up** (`scaleup`) | When the group's running services are, together, at least this full, one more starts. Only one at a time: nothing new starts while another is still coming up, and there is a cooldown between actions, so a burst of joins does not start five servers for a load one would carry. |
+| **Scale down** (`scaledown`) | A service above the minimum that has been **empty** this long is stopped. Empty, not quiet: nobody is ever moved to free a server. |
+| **Start timeout** (`timeout`) | A service that has not reported ready in time is killed and replaced, instead of holding a slot forever. |
+| **Scheduled restarts** (`maxuptime`) | Services older than this are replaced with a rolling restart. `0` is off. Useful for plugins that leak. |
+| **Template rollouts** (`rollout`) | The wrapper watches `local/templates/`. Ten seconds after the last change to a group's templates, its services are replaced one by one. `rollout <group>` does it by hand, `rollout <group> cancel` stops one. |
+| **Busy ports** | Ports are probed before a start. One that something else holds is skipped and left alone for ten minutes. |
+
+A rolling restart never takes capacity away first: it starts the replacement,
+waits for it to be ready, marks the old service **draining** (no new players
+are sent there), moves its players across, and only then stops it. Static
+services are never replaced automatically, since their files are their state.
+
+Fabric servers cannot run the cloud's plugin, so they report no player counts
+and do not autoscale; everything else about them works.
+
+---
+
+## Server software
+
+| `software` | Type | Notes |
+|---|---|---|
+| `paper` | server | The default. |
+| `purpur` | server | A Paper fork with more configuration. Versions from Purpur's API. |
+| `folia` | server | Regionised Paper. The cloud's plugin supports it; the optional permissions plugin does not, and Folia refuses to load plugins that do not declare support. |
+| `fabric` | server | Vanilla with the Fabric loader. `fabric-api` and `FabricProxy-Lite` are downloaded from Modrinth, checksummed, and configured for Velocity forwarding. Readiness comes from the server log. |
+| `velocity` | proxy | |
+
+Set it with `edit <group> software purpur`, or in `setup`. `versions <software>`
+lists what each offers. Every catalogue is fetched from its project's API, with
+downloads hash-checked and cached per version in `wrapper/local/jars/cache/`.
+
+---
+
+## Isolation
+
+By default services are child processes of the wrapper. To give each its own
+container instead, with a hard memory and CPU cap so one runaway server cannot
+starve the machine, set this in `wrapper/config.json`:
+
+```json
+"isolation": {
+  "mode": "docker",
+  "image": "eclipse-temurin:25-jre",
+  "memoryOverheadMb": 384,
+  "defaultCpuLimit": 0
+}
+```
+
+The service directory is bind-mounted, the container runs as the wrapper's own
+user (so files stay yours on Linux), and it reaches the node through
+`host.docker.internal`. The memory cap is the heap plus `memoryOverheadMb`,
+because a JVM uses more than its heap. Per group, `edit <group> cpus 2` caps
+cores. The wrapper verifies that Docker answers before it accepts work, and
+removes containers a crashed wrapper left behind when it starts again.
+
+---
+
+## Backups
+
+`backup <service>` backs up a running service now. For a schedule, per group:
+
+```
+edit Survival backup 60     # every 60 minutes, 0 is off
+edit Survival keep 5        # archives to keep per service
+```
+
+A backup is consistent: the wrapper runs `save-off`, then `save-all flush`,
+waits for the server to confirm the save, zips the directory, and turns saving
+back on however the zip went. Archives land in `wrapper/local/backups/<service>/`.
+Jars, caches, libraries and logs are left out; they are downloaded again anyway.
+Only static services are scheduled, since a dynamic one is thrown away on stop.
+
+---
+
+## Persistence
+
+The node keeps players, bans, friends and module data in a database, chosen in
+`node/config.json`:
+
+```json
+"database": {
+  "type": "json",
+  "host": "127.0.0.1",
+  "port": 0,
+  "database": "siriuscloud",
+  "username": "",
+  "password": "",
+  "uri": "",
+  "poolSize": 4
+}
+```
+
+| `type` | |
+|---|---|
+| `json` | Files under `node/local/database/`. The default: nothing to install. |
+| `mysql`, `mariadb` | One table per collection, `sirius_<collection>`, created on first use. |
+| `postgresql` | The same, with Postgres's upsert. |
+| `mongodb` | One collection per collection. `uri` overrides host and port. |
+
+`port: 0` means the backend's default port. If the configured database cannot be
+opened the node refuses to start, rather than running on and silently losing
+every ban written until somebody notices.
+
+**Player profiles** come for free: first and last seen, total playtime, the last
+server and every name a player has used, looked up by UUID or by any past name.
+
+**A key-value store** sits beside it for state that is shared but not precious:
+queues, parties, counters, locks. It lives in memory on the node, supports TTLs
+and `setIfAbsent`, and is flushed to `node/local/store.json` every few seconds.
+
+From any server, proxy or module:
+
+```java
+CloudDriver cloud = CloudDriver.instance();
+
+cloud.database().collection("stats").put(uuid.toString(), json);
+cloud.store().set("event:double-xp", "on", Duration.ofHours(2));
+cloud.players().profile("Notch").thenAccept(profile -> ...);
+
+// Tell the network what state this server is in: matchmaking and
+// the panel read it, and anything else can.
+cloud.services().setState(ServiceProperties.STATE_INGAME);
+cloud.services().setProperty(ServiceProperties.MAP, "Lighthouse");
+
+// Pub/sub, now only delivered to services that subscribed to the channel.
+cloud.messaging().publish("bedwars:stats", payload);
+```
+
+---
+
 ## The API and the panel
 
 The node loads anything in `node/modules/` at startup. The REST API ships as one
@@ -610,6 +766,110 @@ permission, so it announces "anyone with `siriuscloud.notify` should hear this"
 and each server answers that for its own players using whatever permission
 plugin is installed. That keeps the module a thing that describes events rather
 than a thing that knows about permission plugins.
+
+---
+
+## Network features
+
+These are modules in `node/modules/`, built on the public API like any module
+you would write. Each writes a `config.json` into `node/modules/<name>/` on
+first start where every feature can be switched off; deleting a jar removes the
+module entirely. Worth doing where a network already runs its own plugin for,
+say, bans or private messages: two authorities for the same thing will
+contradict each other.
+
+Commands are registered **on every proxy by the node**, so they work on every
+server with nothing installed there, and appear in tab completion only for
+players with the permission. They can be run from the node console too.
+
+### Display and maintenance
+
+The server list MOTD, version text and tab list, in MiniMessage, set once for
+every proxy. Placeholders: `{online}`, `{max}`, `{proxy}`, `{servers}`, and in
+the tab list `{player}`, `{server}`, `{ping}`.
+
+| Command | Permission |
+|---|---|
+| `/maintenance on\|off\|status` | `siriuscloud.maintenance` |
+| `/maintenance add\|remove <player>`, `list` | `siriuscloud.maintenance` |
+
+Network-wide maintenance: its own MOTD and version text, and only whitelisted
+players or those with `siriuscloud.maintenance.bypass` may join. Turning it on
+does not kick anyone already online. On the node console, `maintenance <group>`
+still pauses one group's provisioning; anything else goes to this command.
+
+### Social
+
+| Command | What it does |
+|---|---|
+| `/party invite\|accept\|deny\|leave\|kick\|promote\|disband\|warp\|chat\|list` (`/p`) | Parties across the network. Members follow the leader between servers. |
+| `/pc <message>` | Party chat |
+| `/friend add\|accept\|deny\|remove\|list\|requests` (`/f`) | Friends, with join and leave notices. Stored in the database. |
+| `/msg <player> <message>` (`/tell`, `/w`, `/m`), `/r` | Private messages to anyone on any server. Muted players cannot send them. |
+| `/seen <player>` | When someone was last online, or where they are now |
+| `/playtime [player]` (`/pt`) | Total time on the network |
+
+### Moderation
+
+| Command | Permission |
+|---|---|
+| `/ban <player> [duration] [reason]` | `siriuscloud.ban` |
+| `/unban <player>` | `siriuscloud.unban` |
+| `/mute <player> [duration] [reason]` | `siriuscloud.mute` |
+| `/unmute <player>` | `siriuscloud.unmute` |
+| `/kick <player> [reason]` | `siriuscloud.kick` |
+| `/staffchat <message>` (`/schat`) | `siriuscloud.staffchat` (also receives moderation notices) |
+| `/find <player>` | `siriuscloud.find` |
+| `/jump <player>` (`/goto`) | `siriuscloud.jump` |
+
+Durations look like `30m`, `12h`, `7d`, `1w2d`; leave it out or write `perm`
+for permanent. Players who are offline are found by any name they have used,
+and a ban is stored against the UUID, so changing name does not escape it.
+
+Bans are checked **at login on the proxy**, so a banned player never reaches a
+server. Mutes are enforced by the cloud's plugin on each server, because signed
+chat cannot be blocked on a proxy without disconnecting the player; they are
+re-sent to every server whenever one connects, and restored after a node
+restart. If the node does not answer a login check within three seconds the
+player is let in rather than locked out with the node.
+
+### Matchmaking
+
+| Command | What it does |
+|---|---|
+| `/play <game>` (`/queue`) | Queue for a group |
+| `/leavequeue` (`/lq`) | Leave it |
+
+Players are sent to the **fullest** joinable server with room, so games fill
+and start instead of all waiting half-empty. A server is joinable when it is
+running, not draining, and its state is `LOBBY` (the default; a game plugin
+sets `INGAME` when a round starts). Slots are reserved for fifteen seconds after
+a send, so two queue ticks cannot promise the same slot twice. If nothing has
+room and the group allows another server, one is started.
+
+A party leader queues the whole party, which only ever lands together. Games
+are every non-fallback server group unless `playableGroups` lists them.
+
+### Metrics
+
+Prometheus metrics at `http://127.0.0.1:9225/metrics`: players, services per
+group and state, per-service players, TPS, MSPT, heap and uptime, wrapper and
+node memory. Set `host` and a `token` in the config to scrape from elsewhere;
+the token is then required as `Authorization: Bearer <token>`.
+
+```yaml
+scrape_configs:
+  - job_name: siriuscloud
+    static_configs: [{ targets: ["127.0.0.1:9225"] }]
+```
+
+### Discord
+
+Paste a webhook URL into `node/modules/discord/config.json` and the network
+reports crashes (with the last lines of the log), wrappers disconnecting, failed
+backups and servers below `lowTps` (one alert per server per ten minutes).
+Service starts and stops can be turned on too. With no URL the module does
+nothing.
 
 ---
 
@@ -797,6 +1057,8 @@ registered under its id.
 | **3: Player layer** ✅ | Registry, transfers, messaging, kicks, restart re-sync |
 | **3b: Node-side templates** | Template storage on the node, pushed to wrappers |
 | **4: Modules** | Module loader ✅, REST API ✅, web panel ✅, in-game commands ✅, notifications ✅, LuckPerms ✅, permissions ✅ · sign walls, NPCs |
+| **4b: Operations** ✅ | Autoscaling, rolling restarts and rollouts, start timeouts, health metrics, backups, Purpur/Folia/Fabric, Docker isolation |
+| **4c: Network** ✅ | Databases, player profiles, key-value store, maintenance and display, parties, friends, messages, bans and mutes, matchmaking, Prometheus, Discord |
 | **5: Scale** | Node clustering, leader election, state replication |
 
 None of milestones 2–4 need core changes: the event bus and the module loader
