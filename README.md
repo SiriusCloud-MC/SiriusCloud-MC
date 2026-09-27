@@ -10,6 +10,7 @@ Runs on **Linux and Windows**.
 |---|---|
 | [Architecture](#architecture) | what the pieces are and why |
 | [Building](#building) and [Running](#running) | standing one up |
+| [Updating](#updating) | new versions, and migrating your files |
 | [Service consoles](#service-consoles) | `attach`, and why crashes are special |
 | [The proxy](#the-proxy) | dynamic registration, slots, forwarding |
 | [Players](#players) | the cloud-wide player layer |
@@ -256,7 +257,53 @@ sirius@node> stop Lobby-1
 | `attach <service>` | Opens that service's console (see below) |
 | `versions [paper\|purpur\|folia\|fabric\|velocity] [--all]` | Versions available to groups |
 | `info` | Node status and connected wrappers |
+| `migrate` | Data version, migration history and backups |
 | `shutdown` | Stops everything, then the node |
+
+---
+
+## Updating
+
+1. Stop the node and the wrappers (`shutdown`).
+2. Replace the program files with the new build's, and nothing else:
+
+   | From `build/dist/` | Replaces |
+   |---|---|
+   | `node/cloud-node.jar` | the node |
+   | `node/modules/*.jar` | the modules |
+   | `wrapper/cloud-wrapper.jar` | each wrapper |
+   | `wrapper/plugins/*.jar` | the plugins injected into every service |
+   | `wrapper/optional-plugins/*.jar` | copy these into your templates again, wherever you put them |
+
+   Keep `config.json`, `groups/`, `local/` and each module's folder: that is
+   your data.
+3. Start the node and the wrappers again.
+
+On startup each one brings its files up to date with the new build before
+reading any of them, and says what it changed:
+
+```
+[Migration] Updating this install's files: 1 migration(s), from version 0 to 1
+[Migration]   1. Give the starter admin group its new 'Admin | Name' prefix
+[Migration]        admin: prefix '&c[Admin] ' -> '&cAdmin &8| &c'
+[Migration] The original files are in local/migration-backups/2026-09-27_20-40-02-from-v0
+```
+
+| | |
+|---|---|
+| **Backups** | Every file is copied to `local/migration-backups/` before it is changed. |
+| **Failures** | A migration that fails has its changes undone, and the node or wrapper stops with the reason. Ones that already succeeded stay applied, so the next start carries on from there. |
+| **Your changes win** | Migrations only replace old defaults. Anything you set yourself is left alone. |
+| **Going back** | An older build refuses to start on data a newer one has migrated, because it would silently drop what it does not understand. Restore the backup, or start it with `-Dsiriuscloud.allowDowngrade=true` if you are sure. |
+
+`migrate` on the node console shows the install's data version, every
+migration applied and when, and where the backups are. The version is kept in
+`local/data-version.json`.
+
+**Adding a migration** (for contributors): implement `Migration` with the next
+number and add it to the end of `NodeMigrations` or `WrapperMigrations`. Change
+files only through the `MigrationContext` you are given, which does the backups
+and the rollback. Never renumber or remove one that has shipped.
 
 ---
 

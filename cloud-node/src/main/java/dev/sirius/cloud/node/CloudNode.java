@@ -21,6 +21,7 @@ import dev.sirius.cloud.node.command.commands.BroadcastCommand;
 import dev.sirius.cloud.node.command.commands.EditCommand;
 import dev.sirius.cloud.node.command.commands.ExecuteCommand;
 import dev.sirius.cloud.node.command.commands.MaintenanceCommand;
+import dev.sirius.cloud.node.command.commands.MigrateCommand;
 import dev.sirius.cloud.node.command.commands.ReloadCommand;
 import dev.sirius.cloud.node.command.commands.RestartCommand;
 import dev.sirius.cloud.node.command.commands.RolloutCommand;
@@ -37,6 +38,8 @@ import dev.sirius.cloud.node.command.commands.StartCommand;
 import dev.sirius.cloud.node.command.commands.StopCommand;
 import dev.sirius.cloud.node.command.commands.VersionsCommand;
 import dev.sirius.cloud.driver.config.DirectoryLock;
+import dev.sirius.cloud.driver.migration.Migrator;
+import dev.sirius.cloud.node.migration.NodeMigrations;
 import dev.sirius.cloud.driver.config.JsonConfig;
 import dev.sirius.cloud.node.config.NodeConfig;
 import dev.sirius.cloud.node.gateway.ProxyGateway;
@@ -120,7 +123,8 @@ public final class CloudNode {
     private final AtomicBoolean shuttingDown = new AtomicBoolean();
 
     private NodeConsole console;
-    private DirectoryLock directoryLock;
+    private final DirectoryLock directoryLock;
+    private final Migrator migrator;
     private NodeDatabase database;
     private NodeKeyValueStore store;
     private PlayerProfiles profiles;
@@ -130,6 +134,17 @@ public final class CloudNode {
         this.workingDirectory = workingDirectory;
 
         Files.createDirectories(workingDirectory.resolve("local"));
+
+        // Two nodes sharing one directory would fight over config.json and
+        // groups/, and the second would fail to bind the port anyway — with a
+        // stack trace instead of an explanation. Taken before anything is read,
+        // because migrations below rewrite files.
+        directoryLock = DirectoryLock.acquire(workingDirectory.resolve(".lock"), "node");
+
+        // Before anything reads a file, so every part of the node only ever
+        // sees files in this build's shape. No config.json means a first start.
+        this.migrator = new Migrator(workingDirectory, NodeMigrations.all());
+        migrator.run(Files.notExists(workingDirectory.resolve("config.json")));
 
         this.config = JsonConfig.loadOrCreate(
                 workingDirectory.resolve("config.json"), NodeConfig.class, NodeConfig::new);
@@ -150,11 +165,6 @@ public final class CloudNode {
     }
 
     public void start() throws Exception {
-        // Two nodes sharing one directory would fight over config.json and
-        // groups/, and the second would fail to bind the port anyway — with a
-        // stack trace instead of an explanation.
-        directoryLock = DirectoryLock.acquire(workingDirectory.resolve(".lock"), "node");
-
         // Checked here rather than left to Netty. A port already in use is the
         // single most common startup failure, and a BindException stack trace
         // buries the one sentence that would tell the operator what to do.
@@ -431,6 +441,7 @@ public final class CloudNode {
         commands.register(new AttachCommand(services, serviceManager, console));
         commands.register(new VersionsCommand(versionCatalogs, config.minimumPaperVersion()));
         commands.register(new InfoCommand(config, services, wrappers));
+        commands.register(new MigrateCommand(migrator));
         commands.register(new ShutdownCommand(this));
     }
 

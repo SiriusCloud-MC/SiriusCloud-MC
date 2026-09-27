@@ -5,6 +5,8 @@ import dev.sirius.cloud.api.logging.CloudLogger;
 import dev.sirius.cloud.api.platform.Platform;
 import dev.sirius.cloud.driver.RemoteCloudDriver;
 import dev.sirius.cloud.driver.config.DirectoryLock;
+import dev.sirius.cloud.driver.migration.Migrator;
+import dev.sirius.cloud.wrapper.migration.WrapperMigrations;
 import dev.sirius.cloud.driver.config.JsonConfig;
 import dev.sirius.cloud.api.service.ServerSoftware;
 import dev.sirius.cloud.driver.paper.FabricVersionCatalog;
@@ -83,7 +85,7 @@ public final class CloudWrapper {
         return thread;
     });
 
-    private DirectoryLock directoryLock;
+    private final DirectoryLock directoryLock;
     private TemplateWatcher templateWatcher;
 
     private final CountDownLatch shutdownLatch = new CountDownLatch(1);
@@ -93,6 +95,15 @@ public final class CloudWrapper {
         this.workingDirectory = workingDirectory;
 
         Files.createDirectories(workingDirectory.resolve("local"));
+
+        // Before anything else touches this directory: a second wrapper here
+        // would clear the first one's running services as "stale", and the
+        // migrations below rewrite files.
+        directoryLock = DirectoryLock.acquire(workingDirectory.resolve(".lock"), "wrapper");
+
+        // No config.json means a first start, with nothing to migrate.
+        new Migrator(workingDirectory, WrapperMigrations.all())
+                .run(Files.notExists(workingDirectory.resolve("config.json")));
 
         this.config = JsonConfig.loadOrCreate(
                 workingDirectory.resolve("config.json"), WrapperConfig.class, WrapperConfig::new);
@@ -139,10 +150,6 @@ public final class CloudWrapper {
             LOGGER.error("Copy the 'Wrapper secret' line from the node's console into wrapper/config.json.");
             return;
         }
-
-        // Before cleanStaleDirectories(), which is precisely the operation that
-        // would destroy another wrapper's running services.
-        directoryLock = DirectoryLock.acquire(workingDirectory.resolve(".lock"), "wrapper");
 
         processes.cleanStaleDirectories();
         reportServiceRuntime();
