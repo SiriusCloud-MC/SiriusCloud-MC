@@ -44,6 +44,9 @@ public final class ServiceProcessManager {
     private final BiConsumer<UUID, StateChange> stateSink;
     private final Consumer<CrashReport> crashSink;
 
+    /** Told when a service's port turns out to be held by something outside the cloud. */
+    private volatile Consumer<Integer> portUnavailableSink = port -> { };
+
     private final Map<UUID, ServiceProcess> processes = new ConcurrentHashMap<>();
 
     public ServiceProcessManager(WrapperConfig config,
@@ -71,6 +74,32 @@ public final class ServiceProcessManager {
         this.crashSink = crashSink;
     }
 
+    public void onPortUnavailable(Consumer<Integer> sink) {
+        this.portUnavailableSink = sink;
+    }
+
+    /**
+     * Fails early and specifically if a service's port is already taken.
+     *
+     * <p>The node allocates ports from its own bookkeeping, which cannot see a
+     * stray process or some other program on this machine. Without the check the
+     * server downloads, copies, spawns and then dies with a bind error buried in
+     * its log - and the node hands the next start the same port.
+     */
+    private void requirePortFree(ServiceInfo info) throws IOException {
+        String bind = config.serviceBindAddress().isBlank() ? "0.0.0.0" : config.serviceBindAddress();
+        try (java.net.ServerSocket probe = new java.net.ServerSocket()) {
+            // Reuse, so a port in TIME_WAIT from the service's own previous run
+            // is not mistaken for one somebody else holds.
+            probe.setReuseAddress(true);
+            probe.bind(new java.net.InetSocketAddress(bind, info.port()));
+        } catch (IOException exception) {
+            portUnavailableSink.accept(info.port());
+            throw new IOException("Port " + info.port() + " is already in use on this machine by something "
+                    + "outside the cloud. The node will pick another port for the next start.");
+        }
+    }
+
     /**
      * Starts a service.
      *
@@ -86,6 +115,7 @@ public final class ServiceProcessManager {
                 // machine cannot run this service at all, say so immediately
                 // rather than after a 60MB download and a doomed spawn.
                 String java = javaFor(group);
+                requirePortFree(info);
 
                 templates.prepare(group);
 

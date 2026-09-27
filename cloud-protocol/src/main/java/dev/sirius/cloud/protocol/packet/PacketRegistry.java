@@ -2,6 +2,8 @@ package dev.sirius.cloud.protocol.packet;
 
 import dev.sirius.cloud.protocol.packet.impl.AcknowledgePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChannelMessagePacket;
+import dev.sirius.cloud.protocol.packet.impl.TemplateChangedPacket;
+import dev.sirius.cloud.protocol.packet.impl.PortUnavailablePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChatRestrictionRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.ChatRestrictionsPacket;
 import dev.sirius.cloud.protocol.packet.impl.ProxyDisplayPacket;
@@ -128,6 +130,8 @@ public final class PacketRegistry {
                 .register(0x25, ServicePlayerUpdatePacket.class, ServicePlayerUpdatePacket::new)
                 .register(0x26, ServiceSnapshotPacket.class, ServiceSnapshotPacket::new)
                 .register(0x27, ServicePropertiesPacket.class, ServicePropertiesPacket::new)
+                .register(0x28, PortUnavailablePacket.class, PortUnavailablePacket::new)
+                .register(0x29, TemplateChangedPacket.class, TemplateChangedPacket::new)
 
                 // 0x30-0x3F — driver queries
                 .register(0x30, ServiceListRequestPacket.class, ServiceListRequestPacket::new)

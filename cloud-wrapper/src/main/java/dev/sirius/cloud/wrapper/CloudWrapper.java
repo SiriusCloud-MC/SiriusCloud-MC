@@ -12,6 +12,8 @@ import dev.sirius.cloud.protocol.packet.PacketRegistry;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleHistoryPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleLinePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
+import dev.sirius.cloud.protocol.packet.impl.PortUnavailablePacket;
+import dev.sirius.cloud.protocol.packet.impl.TemplateChangedPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceCrashReportPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStateUpdatePacket;
 import dev.sirius.cloud.wrapper.config.WrapperConfig;
@@ -23,6 +25,7 @@ import dev.sirius.cloud.wrapper.process.ServiceProcessManager;
 import dev.sirius.cloud.wrapper.setup.Prompter;
 import dev.sirius.cloud.wrapper.setup.WrapperSetup;
 import dev.sirius.cloud.wrapper.template.TemplateManager;
+import dev.sirius.cloud.wrapper.template.TemplateWatcher;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -63,6 +66,7 @@ public final class CloudWrapper {
     });
 
     private DirectoryLock directoryLock;
+    private TemplateWatcher templateWatcher;
 
     private final CountDownLatch shutdownLatch = new CountDownLatch(1);
     private final AtomicBoolean shuttingDown = new AtomicBoolean();
@@ -121,6 +125,12 @@ public final class CloudWrapper {
 
         processes.cleanStaleDirectories();
         reportServiceRuntime();
+
+        processes.onPortUnavailable(port -> client.send(new PortUnavailablePacket(port)));
+
+        templateWatcher = new TemplateWatcher(workingDirectory.resolve("local").resolve("templates"),
+                group -> client.send(new TemplateChangedPacket(group)));
+        templateWatcher.start();
 
         if (config.serviceBindAddress().isBlank()) {
             // Said once per start, because it is a real exposure and the fix
@@ -223,6 +233,10 @@ public final class CloudWrapper {
         // Services are stopped gracefully before the connection goes away, so
         // the node still sees the STOPPED updates rather than inferring crashes.
         processes.stopAll();
+
+        if (templateWatcher != null) {
+            templateWatcher.close();
+        }
 
         client.close();
 

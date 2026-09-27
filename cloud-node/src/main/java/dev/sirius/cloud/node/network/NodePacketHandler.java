@@ -34,6 +34,8 @@ import dev.sirius.cloud.protocol.packet.Packet;
 import dev.sirius.cloud.protocol.packet.impl.AcknowledgePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChannelMessagePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChannelSubscriptionsPacket;
+import dev.sirius.cloud.protocol.packet.impl.PortUnavailablePacket;
+import dev.sirius.cloud.protocol.packet.impl.TemplateChangedPacket;
 import dev.sirius.cloud.protocol.packet.impl.ChatRestrictionRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.LoginCheckPacket;
 import dev.sirius.cloud.protocol.packet.impl.NetworkCommandPacket;
@@ -98,6 +100,13 @@ public final class NodePacketHandler implements PacketHandler {
     private final PlayerRegistry players;
     private final PlayerManager playerManager;
     private final LocalCloudDriver driver;
+
+    /** Told when a wrapper reports a template changed; the rollout machinery decides what that means. */
+    private java.util.function.Consumer<String> templateChanged = group -> { };
+
+    public void onTemplateChanged(java.util.function.Consumer<String> listener) {
+        this.templateChanged = listener;
+    }
 
     public NodePacketHandler(NodeConfig config,
                              ServiceManager serviceManager,
@@ -307,6 +316,18 @@ public final class NodePacketHandler implements PacketHandler {
                     : driver.players().profile(request.name() == null ? "" : request.name()))
                     .whenComplete((profile, error) -> channel.respond(request,
                             new PlayerProfileResponsePacket(error == null ? profile.orElse(null) : null)));
+
+        } else if (packet instanceof PortUnavailablePacket unavailable) {
+            if (channel.type() == ConnectionType.WRAPPER && channel.name() != null) {
+                // Avoided for ten minutes: long enough to stop the next start
+                // landing on it, short enough that whatever held it may be gone.
+                services.blockPort(channel.name(), unavailable.port(), 10 * 60_000L);
+                LOGGER.warn("Port {} on {} is taken by something outside the cloud; avoiding it for 10 minutes",
+                        unavailable.port(), channel.name());
+            }
+
+        } else if (packet instanceof TemplateChangedPacket changed) {
+            templateChanged.accept(changed.groupName());
 
         } else if (packet instanceof ChannelSubscriptionsPacket subscribe) {
             if (channel.serviceId() != null) {

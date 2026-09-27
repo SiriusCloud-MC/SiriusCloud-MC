@@ -22,6 +22,7 @@ import dev.sirius.cloud.node.command.commands.ExecuteCommand;
 import dev.sirius.cloud.node.command.commands.MaintenanceCommand;
 import dev.sirius.cloud.node.command.commands.ReloadCommand;
 import dev.sirius.cloud.node.command.commands.RestartCommand;
+import dev.sirius.cloud.node.command.commands.RolloutCommand;
 import dev.sirius.cloud.node.command.commands.GroupsCommand;
 import dev.sirius.cloud.node.command.commands.HelpCommand;
 import dev.sirius.cloud.node.command.commands.InfoCommand;
@@ -47,7 +48,9 @@ import dev.sirius.cloud.node.module.ModuleManager;
 import dev.sirius.cloud.node.network.NodePacketHandler;
 import dev.sirius.cloud.node.player.PlayerManager;
 import dev.sirius.cloud.node.player.PlayerRegistry;
+import dev.sirius.cloud.node.provisioning.AutoScaler;
 import dev.sirius.cloud.node.provisioning.GroupBackoff;
+import dev.sirius.cloud.node.provisioning.Rollouts;
 import dev.sirius.cloud.node.provisioning.ProvisioningTask;
 import dev.sirius.cloud.node.service.ServiceManager;
 import dev.sirius.cloud.node.service.ServiceChannelRegistry;
@@ -58,6 +61,7 @@ import dev.sirius.cloud.protocol.connection.NetworkServer;
 import dev.sirius.cloud.protocol.packet.PacketRegistry;
 import dev.sirius.cloud.protocol.packet.impl.ServiceAvailabilityPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceUpdatePacket;
+import dev.sirius.cloud.protocol.packet.impl.TemplateChangedPacket;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -94,6 +98,8 @@ public final class CloudNode {
     private final PaperVersionCatalog paperVersions = new PaperVersionCatalog("paper");
     private final PaperVersionCatalog velocityVersions = new PaperVersionCatalog("velocity");
     private final GroupBackoff backoff = new GroupBackoff();
+    private final AutoScaler autoScaler = new AutoScaler();
+    private final Rollouts rollouts;
 
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "sirius-scheduler");
@@ -123,6 +129,7 @@ public final class CloudNode {
 
         this.serviceManager = new ServiceManager(config, groups, services, wrappers, events);
         this.playerManager = new PlayerManager(players, services, serviceChannels);
+        this.rollouts = new Rollouts(groups, services, serviceManager, players, playerManager);
 
         instance = this;
     }
@@ -247,9 +254,13 @@ public final class CloudNode {
             }
         });
 
-        server.start(config.bindAddress(), config.port(), new NodePacketHandler(
+        events.subscribe(ServiceRemovedEvent.class, event -> autoScaler.forget(event.service().uniqueId()));
+
+        NodePacketHandler packetHandler = new NodePacketHandler(
                 config, serviceManager, services, groups, wrappers, events, console,
-                serviceChannels, players, playerManager, driver));
+                serviceChannels, players, playerManager, driver);
+        packetHandler.onTemplateChanged(this::templateChanged);
+        server.start(config.bindAddress(), config.port(), packetHandler);
 
         LOGGER.info("Services connect back to {}:{}", config.connectAddress(), config.port());
         LOGGER.info("Wrapper secret: {}", config.secret());
@@ -266,7 +277,7 @@ public final class CloudNode {
         modules.loadAll();
 
         scheduler.scheduleWithFixedDelay(
-                new ProvisioningTask(groups, services, serviceManager, wrappers, backoff),
+                new ProvisioningTask(groups, services, serviceManager, wrappers, backoff, autoScaler, rollouts),
                 2, 1, TimeUnit.SECONDS);
 
         // Written behind rather than on every change: the store holds state
@@ -279,6 +290,33 @@ public final class CloudNode {
 
         // Blocks this thread until the console exits.
         console.run(this::shutdown);
+    }
+
+    /**
+     * A wrapper saw a template file change.
+     *
+     * <p>Rolled out where the group asks for it, reported where it does not -
+     * otherwise an edit reaches only services started from now on, and a
+     * long-lived group runs on the old files for days without anybody noticing.
+     */
+    private void templateChanged(String groupName) {
+        if (TemplateChangedPacket.GLOBAL.equalsIgnoreCase(groupName)) {
+            groups.all().stream()
+                    .filter(group -> group.type() == ServiceType.SERVER)
+                    .filter(dev.sirius.cloud.api.group.ServiceGroup::rolloutOnTemplateChange)
+                    .forEach(group -> rollouts.start(group.name(), "the global template changed"));
+            return;
+        }
+        groups.byName(groupName).ifPresent(group -> {
+            if (!group.rolloutOnTemplateChange()) {
+                LOGGER.info("The template of {} changed. 'rollout {}' applies it to running services.",
+                        group.name(), group.name());
+                return;
+            }
+            rollouts.start(group.name(), "its template changed")
+                    .ifPresent(reason -> LOGGER.debug("Template of {} changed, not rolling: {}",
+                            group.name(), reason));
+        });
     }
 
     private void pushServiceUpdate(ServiceInfo service, boolean removed) {
@@ -369,6 +407,7 @@ public final class CloudNode {
         commands.register(new StartCommand(groups, serviceManager));
         commands.register(new StopCommand(services, serviceManager));
         commands.register(new RestartCommand(services, serviceManager));
+        commands.register(new RolloutCommand(rollouts, groups));
         commands.register(new EditCommand(groups));
         commands.register(new MaintenanceCommand(groups));
         commands.register(new ReloadCommand(groups));

@@ -76,6 +76,77 @@ public final class ServiceGroup {
      */
     private String javaExecutable = "";
 
+    /**
+     * How long a service may sit in {@code PREPARED} or {@code STARTING} before
+     * it is killed and counted as a failed start.
+     *
+     * <p>Without a limit, a server that spawns but never becomes ready - a
+     * deadlocked plugin, a world that will not load - holds its name, port and
+     * memory forever, and nothing ever backs off because nothing ever fails.
+     */
+    private int startTimeoutSeconds = 180;
+
+    /** Grow and shrink with player load; see {@link Autoscale}. */
+    private Autoscale autoscale = new Autoscale();
+
+    /**
+     * Replace services older than this, one at a time, 0 to never.
+     *
+     * <p>Minecraft servers degrade over long uptimes, and restarting on a
+     * schedule is standard practice. Done as a rolling replacement - start the
+     * new one, move players across, stop the old - so the group never drops
+     * below what it is serving.
+     */
+    private int maxUptimeMinutes = 0;
+
+    /**
+     * Roll the group when one of its template files changes on a wrapper.
+     *
+     * <p>Otherwise an edit to a template only reaches new services, and a
+     * long-lived group can run on the old files for days without anybody
+     * noticing the change never took effect.
+     */
+    private boolean rolloutOnTemplateChange = true;
+
+    /**
+     * Automatic scaling. SERVER groups only: a proxy's address is fixed, and a
+     * second one on the next port along is no help to anybody.
+     */
+    public static final class Autoscale {
+
+        private boolean enabled = true;
+
+        /** Start another service when the group's running services are this full. */
+        private int scaleUpAtPercent = 80;
+
+        /** Stop a service that has had nobody on it for this long, if above the minimum. */
+        private int scaleDownAfterEmptySeconds = 300;
+
+        public boolean enabled() {
+            return enabled;
+        }
+
+        public void enabled(boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public int scaleUpAtPercent() {
+            return scaleUpAtPercent < 1 || scaleUpAtPercent > 100 ? 80 : scaleUpAtPercent;
+        }
+
+        public void scaleUpAtPercent(int scaleUpAtPercent) {
+            this.scaleUpAtPercent = scaleUpAtPercent;
+        }
+
+        public int scaleDownAfterEmptySeconds() {
+            return Math.max(30, scaleDownAfterEmptySeconds);
+        }
+
+        public void scaleDownAfterEmptySeconds(int scaleDownAfterEmptySeconds) {
+            this.scaleDownAfterEmptySeconds = scaleDownAfterEmptySeconds;
+        }
+    }
+
     /** Required by the JSON codec. */
     @SuppressWarnings("unused")
     ServiceGroup() {
@@ -199,6 +270,37 @@ public final class ServiceGroup {
 
     public void javaExecutable(String javaExecutable) {
         this.javaExecutable = javaExecutable;
+    }
+
+    public int startTimeoutSeconds() {
+        return startTimeoutSeconds < 10 ? 180 : startTimeoutSeconds;
+    }
+
+    public void startTimeoutSeconds(int startTimeoutSeconds) {
+        this.startTimeoutSeconds = startTimeoutSeconds;
+    }
+
+    public Autoscale autoscale() {
+        if (autoscale == null) {
+            autoscale = new Autoscale();
+        }
+        return autoscale;
+    }
+
+    public int maxUptimeMinutes() {
+        return Math.max(0, maxUptimeMinutes);
+    }
+
+    public void maxUptimeMinutes(int maxUptimeMinutes) {
+        this.maxUptimeMinutes = maxUptimeMinutes;
+    }
+
+    public boolean rolloutOnTemplateChange() {
+        return rolloutOnTemplateChange;
+    }
+
+    public void rolloutOnTemplateChange(boolean rolloutOnTemplateChange) {
+        this.rolloutOnTemplateChange = rolloutOnTemplateChange;
     }
 
     @Override

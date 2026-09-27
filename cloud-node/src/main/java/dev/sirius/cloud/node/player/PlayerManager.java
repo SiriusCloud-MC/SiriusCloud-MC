@@ -3,6 +3,7 @@ package dev.sirius.cloud.node.player;
 import dev.sirius.cloud.api.logging.CloudLogger;
 import dev.sirius.cloud.api.player.CloudPlayer;
 import dev.sirius.cloud.api.service.ServiceInfo;
+import dev.sirius.cloud.api.service.ServiceProperties;
 import dev.sirius.cloud.api.service.ServiceState;
 import dev.sirius.cloud.api.service.ServiceType;
 import dev.sirius.cloud.node.service.ServiceChannelRegistry;
@@ -89,10 +90,33 @@ public final class PlayerManager {
         Optional<ServiceInfo> target = services.ofGroup(groupName).stream()
                 .filter(service -> service.state() == ServiceState.RUNNING)
                 .filter(service -> service.type() == ServiceType.SERVER)
+                // A draining server is being emptied for a planned stop;
+                // sending somebody there only means moving them twice.
+                .filter(service -> service.property(ServiceProperties.DRAINING).isEmpty())
                 .min(Comparator.comparingInt(this::effectiveLoad));
 
         if (target.isEmpty()) {
             return failed("No running service of group '" + groupName + "'");
+        }
+        return connect(playerId, target.get().name());
+    }
+
+    /**
+     * Sends a player to the least-loaded lobby, other than one being left.
+     *
+     * <p>For moving people off a server that is going away when no other
+     * server of its own group is available to take them.
+     */
+    public CompletableFuture<Void> connectToFallback(UUID playerId, UUID excluding) {
+        Optional<ServiceInfo> target = services.all().stream()
+                .filter(ServiceInfo::fallback)
+                .filter(service -> service.type() == ServiceType.SERVER)
+                .filter(service -> service.state() == ServiceState.RUNNING)
+                .filter(service -> !service.uniqueId().equals(excluding))
+                .filter(service -> service.property(ServiceProperties.DRAINING).isEmpty())
+                .min(Comparator.comparingInt(this::effectiveLoad));
+        if (target.isEmpty()) {
+            return failed("No lobby is available");
         }
         return connect(playerId, target.get().name());
     }

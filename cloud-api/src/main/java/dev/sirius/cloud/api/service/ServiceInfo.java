@@ -123,6 +123,17 @@ public final class ServiceInfo {
         this.state = state;
     }
 
+    /**
+     * Restarts the clock on the current state without changing it.
+     *
+     * <p>For a service the node has just adopted from a wrapper: the timestamp
+     * it carries is the wrapper's, possibly from long ago, and a start timeout
+     * measured from it would kill a healthy service the moment it was found.
+     */
+    public void restartStateClock() {
+        this.stateChangedAt = System.currentTimeMillis();
+    }
+
     /** When the current state began. Falls back to creation for records written before this existed. */
     public long stateSince() {
         return stateChangedAt > 0 ? stateChangedAt : creationTime;

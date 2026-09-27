@@ -25,7 +25,8 @@ public final class EditCommand implements Command {
 
     private static final List<String> FIELDS = List.of(
             "memory", "minmemory", "min", "max", "maxplayers",
-            "version", "build", "port", "static", "fallback", "java");
+            "version", "build", "port", "static", "fallback", "java",
+            "timeout", "autoscale", "scaleup", "scaledown", "maxuptime", "rollout");
 
     private final GroupRegistry groups;
 
@@ -80,6 +81,12 @@ public final class EditCommand implements Command {
                 case "static" -> group.staticService(flag(value));
                 case "fallback" -> group.fallback(flag(value));
                 case "java" -> group.javaExecutable(value.equalsIgnoreCase("default") ? "" : value);
+                case "timeout" -> group.startTimeoutSeconds(positive(value));
+                case "autoscale" -> group.autoscale().enabled(flag(value));
+                case "scaleup" -> group.autoscale().scaleUpAtPercent(percent(value));
+                case "scaledown" -> group.autoscale().scaleDownAfterEmptySeconds(positive(value));
+                case "maxuptime" -> group.maxUptimeMinutes(whole(value));
+                case "rollout" -> group.rolloutOnTemplateChange(flag(value));
                 default -> {
                     LOGGER.warn("Unknown field '{}'. One of: {}", field, String.join(", ", FIELDS));
                     return;
@@ -128,6 +135,14 @@ public final class EditCommand implements Command {
         return parsed;
     }
 
+    private static int percent(String value) {
+        int parsed = positive(value);
+        if (parsed > 100) {
+            throw new IllegalArgumentException("A percentage is at most 100");
+        }
+        return parsed;
+    }
+
     private static int port(String value) {
         int parsed = whole(value);
         if (parsed < 1024 || parsed > 65000) {
@@ -152,7 +167,7 @@ public final class EditCommand implements Command {
         }
         if (args.length == 3) {
             return switch (args[1].toLowerCase(Locale.ROOT)) {
-                case "static", "fallback" -> List.of("on", "off");
+                case "static", "fallback", "autoscale", "rollout" -> List.of("on", "off");
                 case "version", "build" -> List.of("latest");
                 case "java" -> List.of("default");
                 default -> List.of();

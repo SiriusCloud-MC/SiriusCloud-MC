@@ -80,7 +80,20 @@ public final class ServiceManager {
     }
 
     public CompletableFuture<ServiceInfo> start(ServiceGroup group) {
-        if (services.activeCount(group.name()) >= group.maxServiceCount()) {
+        return start(group, false);
+    }
+
+    /**
+     * Starts a service of a group.
+     *
+     * @param surge allow one over the group's maximum. For a replacement that
+     *              has to be up before the service it replaces goes away - a
+     *              rolling restart of a group already at its maximum could not
+     *              otherwise start anything.
+     */
+    public CompletableFuture<ServiceInfo> start(ServiceGroup group, boolean surge) {
+        int limit = group.maxServiceCount() + (surge ? 1 : 0);
+        if (services.activeCount(group.name()) >= limit) {
             return CompletableFuture.failedFuture(new IllegalStateException(
                     group.name() + " is already at its maximum of " + group.maxServiceCount() + " services"));
         }

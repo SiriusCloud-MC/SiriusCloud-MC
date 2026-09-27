@@ -53,11 +53,42 @@ public final class ServiceRegistry {
         return new ServiceId(UUID.randomUUID(), groupName, ordinal);
     }
 
+    /**
+     * Ports something outside the cloud was found holding, per wrapper, and
+     * until when they are avoided.
+     *
+     * <p>Temporary rather than permanent: whatever held the port may well go
+     * away, and a range that only ever shrinks would eventually run dry.
+     */
+    private final Map<String, Map<Integer, Long>> blockedPorts = new ConcurrentHashMap<>();
+
+    /** Avoids a port on one wrapper for a while. */
+    public synchronized void blockPort(String wrapperName, int port, long millis) {
+        blockedPorts.computeIfAbsent(wrapperName, key -> new ConcurrentHashMap<>())
+                .put(port, System.currentTimeMillis() + millis);
+    }
+
+    private boolean blocked(String wrapperName, int port) {
+        Map<Integer, Long> blocked = blockedPorts.get(wrapperName);
+        if (blocked == null) {
+            return false;
+        }
+        Long until = blocked.get(port);
+        if (until == null) {
+            return false;
+        }
+        if (until <= System.currentTimeMillis()) {
+            blocked.remove(port);
+            return false;
+        }
+        return true;
+    }
+
     /** Reserves the lowest free port at or above {@code startPort} on a wrapper. */
     public synchronized int allocatePort(String wrapperName, int startPort) {
         Set<Integer> used = portsByWrapper.computeIfAbsent(wrapperName, key -> new HashSet<>());
         int port = startPort;
-        while (used.contains(port)) {
+        while (used.contains(port) || blocked(wrapperName, port)) {
             port++;
             if (port > 65535) {
                 throw new IllegalStateException("No free port above " + startPort + " on " + wrapperName);
@@ -102,6 +133,9 @@ public final class ServiceRegistry {
      * is taken from the registry contents, so adding it is enough.
      */
     public void adopt(ServiceInfo service) {
+        // The timestamp it arrived with is the wrapper's; a start timeout
+        // measured from it could kill a healthy service the moment it is found.
+        service.restartStateClock();
         add(service);
         reservePort(service.wrapperName(), service.port());
     }
