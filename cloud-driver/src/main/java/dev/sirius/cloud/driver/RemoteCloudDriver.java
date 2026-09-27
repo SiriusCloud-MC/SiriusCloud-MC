@@ -10,6 +10,7 @@ import dev.sirius.cloud.api.event.EventManager;
 import dev.sirius.cloud.api.messaging.ChannelMessage;
 import dev.sirius.cloud.api.database.Database;
 import dev.sirius.cloud.api.messaging.MessagingProvider;
+import dev.sirius.cloud.api.network.NetworkProvider;
 import dev.sirius.cloud.api.store.KeyValueStore;
 import dev.sirius.cloud.api.event.events.ServiceCreatedEvent;
 import dev.sirius.cloud.api.event.events.ServiceRemovedEvent;
@@ -43,6 +44,7 @@ public final class RemoteCloudDriver implements CloudDriver {
     private final RemoteNodeProvider node;
     private final RemoteMessagingProvider messaging;
     private final RemoteData data;
+    private final RemoteNetworkProvider network;
     private final EventManager events = new DefaultEventManager();
 
     private static final CloudLogger LOGGER = CloudLogger.of("Driver");
@@ -64,6 +66,7 @@ public final class RemoteCloudDriver implements CloudDriver {
         this.node = new RemoteNodeProvider(client);
         this.messaging = new RemoteMessagingProvider(client);
         this.data = new RemoteData(client);
+        this.network = new RemoteNetworkProvider(client);
     }
 
     @Override
@@ -89,6 +92,11 @@ public final class RemoteCloudDriver implements CloudDriver {
     @Override
     public MessagingProvider messaging() {
         return messaging;
+    }
+
+    @Override
+    public NetworkProvider network() {
+        return network;
     }
 
     @Override

@@ -12,6 +12,7 @@ import dev.sirius.cloud.protocol.connection.PacketHandler;
 import dev.sirius.cloud.protocol.packet.ConnectionType;
 import dev.sirius.cloud.protocol.packet.Packet;
 import dev.sirius.cloud.protocol.packet.PacketRegistry;
+import dev.sirius.cloud.protocol.packet.impl.ChatRestrictionsPacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
@@ -47,6 +48,8 @@ public final class SiriusCloudPlugin extends JavaPlugin implements Listener {
     private NetworkClient client;
     private RemoteCloudDriver driver;
 
+    private final ChatGuard chatGuard = new ChatGuard();
+
     private final AtomicBoolean authenticated = new AtomicBoolean();
     private final AtomicBoolean serverLoaded = new AtomicBoolean();
     private final AtomicBoolean readySent = new AtomicBoolean();
@@ -79,6 +82,7 @@ public final class SiriusCloudPlugin extends JavaPlugin implements Listener {
         }
 
         getServer().getPluginManager().registerEvents(this, this);
+        getServer().getPluginManager().registerEvents(chatGuard, this);
 
         client = new NetworkClient(PacketRegistry.standard());
 
@@ -173,6 +177,11 @@ public final class SiriusCloudPlugin extends JavaPlugin implements Listener {
         @Override
         public void onPacket(NetworkChannel channel, Packet packet) {
             if (driver.handle(packet)) {
+                return;
+            }
+
+            if (packet instanceof ChatRestrictionsPacket restrictions) {
+                chatGuard.replace(restrictions);
                 return;
             }
 

@@ -2,6 +2,8 @@ package dev.sirius.cloud.node;
 
 import dev.sirius.cloud.api.database.Database;
 import dev.sirius.cloud.api.driver.CloudDriver;
+import dev.sirius.cloud.api.network.NetworkProvider;
+import dev.sirius.cloud.node.gateway.ProxyGateway;
 import dev.sirius.cloud.api.player.PlayerProfile;
 import dev.sirius.cloud.api.store.KeyValueStore;
 import dev.sirius.cloud.node.player.PlayerProfiles;
@@ -57,6 +59,7 @@ public final class LocalCloudDriver implements CloudDriver {
     private final KeyValueStore store;
     private final Database database;
     private final PlayerProfiles profiles;
+    private final ProxyGateway gateway;
 
     public LocalCloudDriver(ServiceManager serviceManager,
                             ServiceRegistry serviceRegistry,
@@ -69,7 +72,8 @@ public final class LocalCloudDriver implements CloudDriver {
                             ServiceChannelRegistry serviceChannels,
                             KeyValueStore store,
                             Database database,
-                            PlayerProfiles profiles) {
+                            PlayerProfiles profiles,
+                            ProxyGateway gateway) {
         this.serviceManager = serviceManager;
         this.serviceRegistry = serviceRegistry;
         this.groupRegistry = groupRegistry;
@@ -82,6 +86,7 @@ public final class LocalCloudDriver implements CloudDriver {
         this.store = store;
         this.database = database;
         this.profiles = profiles;
+        this.gateway = gateway;
     }
 
     /** The node's own description, rebuilt per call so the counters are current. */
@@ -205,6 +210,16 @@ public final class LocalCloudDriver implements CloudDriver {
             }
 
             @Override
+            public CompletableFuture<Void> sendRichMessage(UUID uniqueId, String miniMessage) {
+                return playerManager.sendRichMessage(uniqueId, miniMessage);
+            }
+
+            @Override
+            public CompletableFuture<Void> broadcastRich(String miniMessage, String permission) {
+                return playerManager.broadcastRich(miniMessage, permission);
+            }
+
+            @Override
             public CompletableFuture<Void> kick(UUID uniqueId, String reason) {
                 return playerManager.kick(uniqueId, reason);
             }
@@ -271,6 +286,16 @@ public final class LocalCloudDriver implements CloudDriver {
     /** Routes an inbound channel message from a service to node-side subscribers. */
     public void deliverChannelMessage(ChannelMessage message) {
         messaging.deliver(message);
+    }
+
+    @Override
+    public NetworkProvider network() {
+        return gateway;
+    }
+
+    /** The concrete gateway, for the packet handler that feeds it. */
+    public ProxyGateway gateway() {
+        return gateway;
     }
 
     @Override

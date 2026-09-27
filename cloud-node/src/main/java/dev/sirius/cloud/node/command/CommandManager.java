@@ -19,6 +19,31 @@ public final class CommandManager {
     private final Map<String, Command> commands = new LinkedHashMap<>();
     private final List<Command> registered = new ArrayList<>();
 
+    /**
+     * What an unknown command falls through to.
+     *
+     * <p>The network commands modules register - {@code ban}, {@code party} -
+     * run here too, as the console, so the node is never the one place an
+     * operator cannot use them.
+     */
+    public interface Fallback {
+        boolean dispatch(String name, String[] args);
+
+        Map<String, String> describe();
+
+        List<String> complete(String name, String[] args);
+    }
+
+    private volatile Fallback fallback;
+
+    public void fallback(Fallback fallback) {
+        this.fallback = fallback;
+    }
+
+    public Optional<Fallback> fallback() {
+        return Optional.ofNullable(fallback);
+    }
+
     public void register(Command command) {
         commands.put(command.name().toLowerCase(Locale.ROOT), command);
         command.aliases().forEach(alias -> commands.put(alias.toLowerCase(Locale.ROOT), command));
@@ -43,14 +68,17 @@ public final class CommandManager {
             return;
         }
 
-        Optional<Command> command = find(parts[0]);
-        if (command.isEmpty()) {
-            LOGGER.warn("Unknown command '{}'. Type 'help' for a list.", parts[0]);
-            return;
-        }
-
         String[] args = new String[parts.length - 1];
         System.arraycopy(parts, 1, args, 0, args.length);
+
+        Optional<Command> command = find(parts[0]);
+        if (command.isEmpty()) {
+            Fallback current = fallback;
+            if (current == null || !current.dispatch(parts[0], args)) {
+                LOGGER.warn("Unknown command '{}'. Type 'help' for a list.", parts[0]);
+            }
+            return;
+        }
 
         try {
             command.get().execute(args);

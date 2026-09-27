@@ -100,6 +100,16 @@ final class RemotePlayerProvider implements PlayerProvider {
     }
 
     @Override
+    public CompletableFuture<Void> sendRichMessage(UUID uniqueId, String miniMessage) {
+        return acknowledged(new PlayerMessagePacket(uniqueId, miniMessage, true, null));
+    }
+
+    @Override
+    public CompletableFuture<Void> broadcastRich(String miniMessage, String permission) {
+        return acknowledged(new PlayerMessagePacket(null, miniMessage, true, permission));
+    }
+
+    @Override
     public CompletableFuture<Void> kick(UUID uniqueId, String reason) {
         return acknowledged(new PlayerKickPacket(uniqueId, reason));
     }

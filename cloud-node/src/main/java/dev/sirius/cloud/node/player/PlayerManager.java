@@ -146,6 +146,21 @@ public final class PlayerManager {
         return send(playerId, player -> new PlayerMessagePacket(playerId, message));
     }
 
+    public CompletableFuture<Void> sendRichMessage(UUID playerId, String miniMessage) {
+        return send(playerId, player -> new PlayerMessagePacket(playerId, miniMessage, true, null));
+    }
+
+    /**
+     * A MiniMessage broadcast, optionally only to holders of a permission.
+     *
+     * <p>Each proxy tests the permission, since only it knows who holds one.
+     */
+    public CompletableFuture<Void> broadcastRich(String miniMessage, String permission) {
+        serviceChannels.broadcastToProxies(services,
+                new PlayerMessagePacket(null, miniMessage, true, permission));
+        return CompletableFuture.completedFuture(null);
+    }
+
     public CompletableFuture<Void> kick(UUID playerId, String reason) {
         return send(playerId, player -> new PlayerKickPacket(playerId, reason));
     }

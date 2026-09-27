@@ -5,6 +5,7 @@ import com.google.gson.JsonParser;
 import com.google.inject.Inject;
 import com.velocitypowered.api.command.CommandSource;
 import com.velocitypowered.api.command.SimpleCommand;
+import com.velocitypowered.api.event.EventTask;
 import com.velocitypowered.api.event.ResultedEvent;
 import com.velocitypowered.api.event.Subscribe;
 import com.velocitypowered.api.event.connection.LoginEvent;
@@ -26,7 +27,9 @@ import dev.sirius.cloud.api.logging.CloudLogger;
 import dev.sirius.cloud.api.messaging.ChannelMessage;
 import dev.sirius.cloud.api.platform.Platform;
 import dev.sirius.cloud.api.player.CloudPlayer;
+import dev.sirius.cloud.api.event.events.ServiceUpdatedEvent;
 import dev.sirius.cloud.api.service.ServiceInfo;
+import dev.sirius.cloud.api.service.ServiceProperties;
 import dev.sirius.cloud.api.service.ServiceState;
 import dev.sirius.cloud.driver.RemoteCloudDriver;
 import dev.sirius.cloud.plugin.velocity.luckperms.LuckPermsSupport;
@@ -43,7 +46,9 @@ import dev.sirius.cloud.protocol.packet.impl.PlayerConnectRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerDisconnectPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerKickPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerLoginPacket;
+import dev.sirius.cloud.protocol.packet.impl.NetworkCommandsPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerMessagePacket;
+import dev.sirius.cloud.protocol.packet.impl.ProxyDisplayPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerSnapshotPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerSwitchServerPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceAvailabilityPacket;
@@ -106,9 +111,12 @@ public final class SiriusCloudVelocityPlugin {
      * @param info       what Velocity needs to reach it
      * @param fallback   whether players may be sent here on join or via /hub
      * @param maxPlayers its own slot count, as the server itself reported it
+     * @param draining   being emptied before a planned stop, so no new players
      */
-    private record Backend(ServerInfo info, boolean fallback, int maxPlayers) {
+    private record Backend(ServerInfo info, boolean fallback, int maxPlayers, boolean draining) {
     }
+
+    private NetworkBridge bridge;
 
     private final AtomicBoolean authenticated = new AtomicBoolean();
     private final AtomicBoolean readySent = new AtomicBoolean();
@@ -150,6 +158,9 @@ public final class SiriusCloudVelocityPlugin {
                 proxy.getCommandManager().metaBuilder("server").build(),
                 new ServerCommand(proxy));
 
+        bridge = new NetworkBridge(proxy, this, logger, () -> client, connection::serviceName,
+                this::advertisedCapacity, backends::size);
+
         client = new NetworkClient(PacketRegistry.standard());
 
         // Built before connecting: the handler routes packets into it, and a
@@ -160,6 +171,14 @@ public final class SiriusCloudVelocityPlugin {
         client.connect(connection.nodeHost(), connection.nodePort(), new ProxyPacketHandler());
 
         CloudDriver.instance().messaging().subscribe(NOTIFY_CHANNEL, this::showNotification);
+
+        // A backend that starts draining, fills up or stops being a lobby is
+        // told to us through the driver's live service view; routing follows.
+        driver.events().subscribe(ServiceUpdatedEvent.class, updated -> refreshBackend(updated.service()));
+
+        proxy.getScheduler().buildTask(this, bridge::refreshTablist)
+                .repeat(2, TimeUnit.SECONDS)
+                .schedule();
 
         configuredMaxPlayers = proxy.getConfiguration().getShowMaxPlayers();
 
@@ -252,6 +271,7 @@ public final class SiriusCloudVelocityPlugin {
     private Optional<RegisteredServer> pickFallback() {
         return backends.values().stream()
                 .filter(Backend::fallback)
+                .filter(backend -> !backend.draining())
                 .map(backend -> proxy.getServer(backend.info().getName()))
                 .filter(Optional::isPresent)
                 .map(Optional::get)
@@ -279,17 +299,18 @@ public final class SiriusCloudVelocityPlugin {
      * to deal with whatever filled the cloud up.
      */
     @Subscribe
-    public void onLogin(LoginEvent event) {
+    public EventTask onLogin(LoginEvent event) {
         int capacity = advertisedCapacity();
-        if (capacity <= 0 || proxy.getPlayerCount() < capacity) {
-            return;
+        boolean full = capacity > 0 && proxy.getPlayerCount() >= capacity;
+        if (full && !event.getPlayer().hasPermission("siriuscloud.joinfull")) {
+            event.setResult(ResultedEvent.ComponentResult.denied(
+                    Component.text("The network is full (" + proxy.getPlayerCount()
+                            + "/" + capacity + ").", NamedTextColor.RED)));
+            return null;
         }
-        if (event.getPlayer().hasPermission("siriuscloud.joinfull")) {
-            return;
-        }
-        event.setResult(ResultedEvent.ComponentResult.denied(
-                Component.text("The network is full (" + proxy.getPlayerCount()
-                        + "/" + capacity + ").", NamedTextColor.RED)));
+        // Then the node's login filters - bans, maintenance - asynchronously,
+        // so a slow answer holds this one login rather than a proxy thread.
+        return bridge == null ? null : EventTask.resumeWhenComplete(bridge.checkLogin(event));
     }
 
     @Subscribe
@@ -376,9 +397,12 @@ public final class SiriusCloudVelocityPlugin {
      */
     @Subscribe
     public void onProxyPing(ProxyPingEvent event) {
-        int capacity = advertisedCapacity();
+        if (bridge != null) {
+            event.setPing(bridge.applyTo(event.getPing()));
+            return;
+        }
         ServerPing ping = event.getPing();
-        event.setPing(ping.asBuilder().maximumPlayers(capacity).build());
+        event.setPing(ping.asBuilder().maximumPlayers(advertisedCapacity()).build());
     }
 
     private int advertisedCapacity() {
@@ -433,8 +457,7 @@ public final class SiriusCloudVelocityPlugin {
                     .ifPresent(existing -> proxy.unregisterServer(existing.getServerInfo()));
 
             proxy.registerServer(info);
-            backends.put(service.uniqueId(),
-                    new Backend(info, service.fallback(), service.maxPlayers()));
+            backends.put(service.uniqueId(), backendOf(info, service));
 
             logger.info("Registered {} at {}:{} ({} slots{}) - cloud now advertises {}",
                     service.name(), service.host(), service.port(), service.maxPlayers(),
@@ -475,6 +498,16 @@ public final class SiriusCloudVelocityPlugin {
                 }
             });
         }
+    }
+
+    private static Backend backendOf(ServerInfo info, ServiceInfo service) {
+        return new Backend(info, service.fallback(), service.maxPlayers(),
+                service.property(ServiceProperties.DRAINING).isPresent());
+    }
+
+    /** Applies a live update to a backend already registered here. */
+    private void refreshBackend(ServiceInfo service) {
+        backends.computeIfPresent(service.uniqueId(), (id, backend) -> backendOf(backend.info(), service));
     }
 
     private void heartbeat() {
@@ -551,12 +584,13 @@ public final class SiriusCloudVelocityPlugin {
                                         player.getUsername(), request.serviceName())));
 
             } else if (packet instanceof PlayerMessagePacket message) {
-                Component text = Component.text(message.message());
-                if (message.isBroadcast()) {
-                    proxy.getAllPlayers().forEach(player -> player.sendMessage(text));
-                } else {
-                    proxy.getPlayer(message.playerId()).ifPresent(player -> player.sendMessage(text));
-                }
+                bridge.deliver(message);
+
+            } else if (packet instanceof NetworkCommandsPacket commands) {
+                bridge.syncCommands(commands);
+
+            } else if (packet instanceof ProxyDisplayPacket display) {
+                bridge.display(display);
 
             } else if (packet instanceof PlayerKickPacket kick) {
                 proxy.getPlayer(kick.playerId()).ifPresent(player ->

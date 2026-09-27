@@ -34,12 +34,15 @@ final class CommandCompleter implements Completer {
             commands.all().forEach(command ->
                     candidates.add(new Candidate(command.name(), command.name(), null,
                             command.description(), null, null, true)));
+            commands.fallback().ifPresent(fallback -> fallback.describe().forEach((name, description) ->
+                    candidates.add(new Candidate(name, name, null, description, null, null, true))));
             return;
         }
 
-        commands.find(words.get(0)).ifPresent(command -> {
-            String[] args = words.subList(1, line.wordIndex()).toArray(String[]::new);
-            command.complete(args).forEach(value -> candidates.add(new Candidate(value)));
-        });
+        String[] args = words.subList(1, line.wordIndex()).toArray(String[]::new);
+        commands.find(words.get(0)).ifPresentOrElse(
+                command -> command.complete(args).forEach(value -> candidates.add(new Candidate(value))),
+                () -> commands.fallback().ifPresent(fallback -> fallback.complete(words.get(0), args)
+                        .forEach(value -> candidates.add(new Candidate(value)))));
     }
 }

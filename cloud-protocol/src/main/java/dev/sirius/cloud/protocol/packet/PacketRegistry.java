@@ -2,6 +2,14 @@ package dev.sirius.cloud.protocol.packet;
 
 import dev.sirius.cloud.protocol.packet.impl.AcknowledgePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChannelMessagePacket;
+import dev.sirius.cloud.protocol.packet.impl.ChatRestrictionRequestPacket;
+import dev.sirius.cloud.protocol.packet.impl.ChatRestrictionsPacket;
+import dev.sirius.cloud.protocol.packet.impl.ProxyDisplayPacket;
+import dev.sirius.cloud.protocol.packet.impl.LoginVerdictPacket;
+import dev.sirius.cloud.protocol.packet.impl.LoginCheckPacket;
+import dev.sirius.cloud.protocol.packet.impl.NetworkSuggestionsPacket;
+import dev.sirius.cloud.protocol.packet.impl.NetworkCommandPacket;
+import dev.sirius.cloud.protocol.packet.impl.NetworkCommandsPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerProfileResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerProfileRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.DataResponsePacket;
@@ -150,6 +158,16 @@ public final class PacketRegistry {
 
                 // 0x60-0x6F - shared state
                 .register(0x60, DataRequestPacket.class, DataRequestPacket::new)
-                .register(0x61, DataResponsePacket.class, DataResponsePacket::new);
+                .register(0x61, DataResponsePacket.class, DataResponsePacket::new)
+
+                // 0x70-0x7F - the network edge: commands, logins, display, chat
+                .register(0x70, NetworkCommandsPacket.class, NetworkCommandsPacket::new)
+                .register(0x71, NetworkCommandPacket.class, NetworkCommandPacket::new)
+                .register(0x72, NetworkSuggestionsPacket.class, NetworkSuggestionsPacket::new)
+                .register(0x73, LoginCheckPacket.class, LoginCheckPacket::new)
+                .register(0x74, LoginVerdictPacket.class, LoginVerdictPacket::new)
+                .register(0x75, ProxyDisplayPacket.class, ProxyDisplayPacket::new)
+                .register(0x76, ChatRestrictionsPacket.class, ChatRestrictionsPacket::new)
+                .register(0x77, ChatRestrictionRequestPacket.class, ChatRestrictionRequestPacket::new);
     }
 }

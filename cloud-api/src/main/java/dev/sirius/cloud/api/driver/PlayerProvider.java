@@ -41,6 +41,26 @@ public interface PlayerProvider {
 
     CompletableFuture<Void> sendMessage(UUID uniqueId, String message);
 
+    /**
+     * A message rendered as MiniMessage.
+     *
+     * <p>Separate from {@link #sendMessage} so that plain messages stay plain:
+     * existing callers pass text that may contain a {@code <}, and
+     * reinterpreting it as markup would change what they send.
+     */
+    CompletableFuture<Void> sendRichMessage(UUID uniqueId, String miniMessage);
+
+    /**
+     * A MiniMessage broadcast, optionally only to those holding a permission.
+     *
+     * <p>The permission is tested by each proxy, which is the only thing that
+     * knows who holds it - so staff chat reaches exactly the staff, wherever
+     * they are.
+     *
+     * @param permission null for everyone
+     */
+    CompletableFuture<Void> broadcastRich(String miniMessage, String permission);
+
     /** Message to everyone online, across every proxy. */
     CompletableFuture<Void> broadcast(String message);
 

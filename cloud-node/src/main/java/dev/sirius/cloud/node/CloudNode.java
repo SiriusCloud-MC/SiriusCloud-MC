@@ -2,6 +2,8 @@ package dev.sirius.cloud.node;
 
 import dev.sirius.cloud.api.driver.CloudDriver;
 import dev.sirius.cloud.api.event.EventManager;
+import dev.sirius.cloud.api.event.events.PlayerConnectEvent;
+import dev.sirius.cloud.api.event.events.PlayerDisconnectEvent;
 import dev.sirius.cloud.api.event.events.ServiceCreatedEvent;
 import dev.sirius.cloud.api.event.events.ServiceRemovedEvent;
 import dev.sirius.cloud.api.event.events.ServiceUpdatedEvent;
@@ -35,6 +37,7 @@ import dev.sirius.cloud.node.command.commands.VersionsCommand;
 import dev.sirius.cloud.driver.config.DirectoryLock;
 import dev.sirius.cloud.driver.config.JsonConfig;
 import dev.sirius.cloud.node.config.NodeConfig;
+import dev.sirius.cloud.node.gateway.ProxyGateway;
 import dev.sirius.cloud.node.database.NodeDatabase;
 import dev.sirius.cloud.node.player.PlayerProfiles;
 import dev.sirius.cloud.node.store.NodeKeyValueStore;
@@ -167,11 +170,37 @@ public final class CloudNode {
         profiles = new PlayerProfiles(database);
         profiles.attach(events);
 
+        ProxyGateway gateway = new ProxyGateway(services, serviceChannels, players, playerManager);
+
         // Held as well as bound: the packet handler answers node queries through
         // it, so the API and the console describe the node from one place.
         LocalCloudDriver driver = new LocalCloudDriver(
                 serviceManager, services, groups, events, players, playerManager, wrappers, config, serviceChannels,
-                store, database, profiles);
+                store, database, profiles, gateway);
+
+        // Network commands run from here too, as the console, so an operator is
+        // never unable to use a command a module added just because they are
+        // at the node rather than in game.
+        commands.fallback(new CommandManager.Fallback() {
+            @Override
+            public boolean dispatch(String name, String[] args) {
+                return gateway.executeConsole(name, args);
+            }
+
+            @Override
+            public java.util.Map<String, String> describe() {
+                return gateway.describeCommands();
+            }
+
+            @Override
+            public java.util.List<String> complete(String name, String[] args) {
+                return gateway.suggestConsole(name, args);
+            }
+        });
+
+        // Proxies show the whole cloud's online count, not just their own.
+        events.subscribe(PlayerConnectEvent.class, event -> gateway.onlineChanged());
+        events.subscribe(PlayerDisconnectEvent.class, event -> gateway.onlineChanged());
         CloudDriver.bind(driver);
 
         // An attached console must not outlive the service it is attached to.
@@ -244,6 +273,7 @@ public final class CloudNode {
         // that tolerates losing a few seconds, and a write per increment would
         // turn a busy counter into a busy disk.
         scheduler.scheduleWithFixedDelay(store::flush, 5, 5, TimeUnit.SECONDS);
+        scheduler.scheduleWithFixedDelay(gateway::tick, 1, 1, TimeUnit.SECONDS);
 
         Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "sirius-shutdown"));
 

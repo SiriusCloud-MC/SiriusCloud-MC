@@ -34,6 +34,10 @@ import dev.sirius.cloud.protocol.packet.Packet;
 import dev.sirius.cloud.protocol.packet.impl.AcknowledgePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChannelMessagePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChannelSubscriptionsPacket;
+import dev.sirius.cloud.protocol.packet.impl.ChatRestrictionRequestPacket;
+import dev.sirius.cloud.protocol.packet.impl.LoginCheckPacket;
+import dev.sirius.cloud.protocol.packet.impl.NetworkCommandPacket;
+import dev.sirius.cloud.protocol.packet.impl.NetworkSuggestionsPacket;
 import dev.sirius.cloud.protocol.packet.impl.DataRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerProfileRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerProfileResponsePacket;
@@ -76,6 +80,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 /** Every inbound packet the node knows how to answer. */
 public final class NodePacketHandler implements PacketHandler {
@@ -209,10 +214,36 @@ public final class NodePacketHandler implements PacketHandler {
                     .whenComplete((ignored, error) -> acknowledge(channel, request, error));
 
         } else if (packet instanceof PlayerMessagePacket message) {
-            (message.isBroadcast()
-                    ? playerManager.broadcast(message.message())
-                    : playerManager.sendMessage(message.playerId(), message.message()))
-                    .whenComplete((ignored, error) -> acknowledge(channel, message, error));
+            CompletableFuture<Void> sent;
+            if (message.isBroadcast()) {
+                sent = message.rich()
+                        ? playerManager.broadcastRich(message.message(), message.permission())
+                        : playerManager.broadcast(message.message());
+            } else {
+                sent = message.rich()
+                        ? playerManager.sendRichMessage(message.playerId(), message.message())
+                        : playerManager.sendMessage(message.playerId(), message.message());
+            }
+            sent.whenComplete((ignored, error) -> acknowledge(channel, message, error));
+
+        } else if (packet instanceof NetworkCommandPacket command) {
+            if (command.suggest()) {
+                driver.gateway().suggest(command).thenAccept(suggestions ->
+                        channel.respond(command, new NetworkSuggestionsPacket(suggestions)));
+            } else {
+                driver.gateway().execute(command);
+            }
+
+        } else if (packet instanceof LoginCheckPacket check) {
+            driver.gateway().checkLogin(check, channel.name())
+                    .thenAccept(verdict -> channel.respond(check, verdict));
+
+        } else if (packet instanceof ChatRestrictionRequestPacket restriction) {
+            (restriction.lift()
+                    ? driver.gateway().liftChatRestriction(restriction.playerId())
+                    : driver.gateway().restrictChat(restriction.playerId(),
+                            restriction.untilMillis(), restriction.reason()))
+                    .whenComplete((ignored, error) -> acknowledge(channel, restriction, error));
 
         } else if (packet instanceof PlayerKickPacket kick) {
             playerManager.kick(kick.playerId(), kick.reason())
@@ -384,6 +415,7 @@ public final class NodePacketHandler implements PacketHandler {
     /** Whether a packet changes cloud state, as opposed to reading it. */
     private static boolean mutates(Packet packet) {
         return packet instanceof ServicePropertiesPacket
+                || packet instanceof ChatRestrictionRequestPacket
                 || (packet instanceof DataRequestPacket data && data.operation().mutates())
                 || packet instanceof ServiceStartRequestPacket
                 || packet instanceof ServiceStopPacket
@@ -470,9 +502,16 @@ public final class NodePacketHandler implements PacketHandler {
             // A proxy needs the servers that already exist, not only the ones
             // that appear after it. Without this, restarting a proxy leaves it
             // blind to every server that was running at the time.
-            services.byId(handshake.serviceId())
-                    .filter(service -> service.type() == ServiceType.PROXY)
-                    .ifPresent(proxy -> seedProxy(channel, proxy.name()));
+            services.byId(handshake.serviceId()).ifPresent(service -> {
+                if (service.type() == ServiceType.PROXY) {
+                    seedProxy(channel, service.name());
+                    // Commands, the login gate and the display, so a proxy
+                    // that restarted serves the same network as before.
+                    driver.gateway().syncProxy(channel);
+                } else {
+                    driver.gateway().syncServer(channel);
+                }
+            });
 
             LOGGER.debug("{} '{}' connected", handshake.type(), handshake.name());
         } else {

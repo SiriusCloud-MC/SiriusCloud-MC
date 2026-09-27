@@ -3,6 +3,7 @@ package dev.sirius.cloud.api.driver;
 import dev.sirius.cloud.api.event.EventManager;
 import dev.sirius.cloud.api.database.Database;
 import dev.sirius.cloud.api.messaging.MessagingProvider;
+import dev.sirius.cloud.api.network.NetworkProvider;
 import dev.sirius.cloud.api.store.KeyValueStore;
 
 /**
@@ -32,6 +33,9 @@ public interface CloudDriver {
 
     /** Persistent documents in whatever database the node is configured with. */
     Database database();
+
+    /** Commands, the login gate and the proxy display - the edge players meet. */
+    NetworkProvider network();
 
     EventManager events();
 
