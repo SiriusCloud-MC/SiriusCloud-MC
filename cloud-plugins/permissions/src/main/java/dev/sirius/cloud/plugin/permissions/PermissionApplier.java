@@ -34,13 +34,6 @@ final class PermissionApplier {
     }
 
     /** Reapplies to everyone currently online. Called when a snapshot arrives. */
-    void applyAll(PermissionSnapshot snapshot) {
-        // Attachments touch Bukkit's permissible state, which is not safe to
-        // mutate off the main thread. Snapshots arrive on a Netty thread.
-        Bukkit.getScheduler().runTask(plugin,
-                () -> Bukkit.getOnlinePlayers().forEach(player -> apply(player, snapshot)));
-    }
-
     void apply(Player player, PermissionSnapshot snapshot) {
         PermissionAttachment previous = attachments.remove(player.getUniqueId());
         if (previous != null) {

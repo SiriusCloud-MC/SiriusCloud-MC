@@ -138,7 +138,14 @@ public final class PermissionsPlugin extends JavaPlugin implements Listener {
 
         boolean first = current == null;
         this.snapshot = incoming;
-        applier.applyAll(incoming);
+
+        // Names as well as permissions: a rank change has to show in the tab
+        // list straight away, not the next time the player happens to rejoin.
+        // Both touch Bukkit state, and snapshots arrive on a Netty thread.
+        Bukkit.getScheduler().runTask(this, () -> Bukkit.getOnlinePlayers().forEach(player -> {
+            applier.apply(player, incoming);
+            applyDisplayName(player, incoming);
+        }));
 
         if (first) {
             getLogger().info("Applied cloud permissions: "
@@ -200,7 +207,8 @@ public final class PermissionsPlugin extends JavaPlugin implements Listener {
     }
 
     /**
-     * Puts the player's prefix in the tab list and above their head.
+     * Puts the player's prefix and suffix in the tab list and display name, or
+     * takes them away again when the player no longer has one.
      *
      * <p>Chat itself is left alone. Every chat plugin formats chat, and a
      * permissions plugin quietly rewriting the format is how two plugins end up
@@ -210,6 +218,10 @@ public final class PermissionsPlugin extends JavaPlugin implements Listener {
         String prefix = PermissionResolver.prefixOf(current, player.getUniqueId());
         String suffix = PermissionResolver.suffixOf(current, player.getUniqueId());
         if (prefix.isEmpty() && suffix.isEmpty()) {
+            // Null restores the plain name; returning early would leave a
+            // player who just lost their rank still wearing its prefix.
+            player.playerListName(null);
+            player.displayName(null);
             return;
         }
         Component name = LEGACY.deserialize(prefix)
