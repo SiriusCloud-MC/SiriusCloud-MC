@@ -3,6 +3,7 @@ package dev.sirius.cloud.node.network;
 import dev.sirius.cloud.api.event.EventManager;
 import dev.sirius.cloud.api.event.events.ServiceCreatedEvent;
 import dev.sirius.cloud.api.event.events.ServiceUpdatedEvent;
+import dev.sirius.cloud.api.event.events.ServiceMetricsEvent;
 import dev.sirius.cloud.api.event.events.WrapperConnectedEvent;
 import dev.sirius.cloud.api.event.events.WrapperDisconnectedEvent;
 import dev.sirius.cloud.api.logging.CloudLogger;
@@ -35,6 +36,7 @@ import dev.sirius.cloud.protocol.packet.impl.AcknowledgePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChannelMessagePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChannelSubscriptionsPacket;
 import dev.sirius.cloud.protocol.packet.impl.PortUnavailablePacket;
+import dev.sirius.cloud.protocol.packet.impl.ServiceMetricsPacket;
 import dev.sirius.cloud.protocol.packet.impl.TemplateChangedPacket;
 import dev.sirius.cloud.protocol.packet.impl.ChatRestrictionRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.LoginCheckPacket;
@@ -316,6 +318,15 @@ public final class NodePacketHandler implements PacketHandler {
                     : driver.players().profile(request.name() == null ? "" : request.name()))
                     .whenComplete((profile, error) -> channel.respond(request,
                             new PlayerProfileResponsePacket(error == null ? profile.orElse(null) : null)));
+
+        } else if (packet instanceof ServiceMetricsPacket metrics) {
+            // Only from the service itself, for the same reason as properties.
+            if (channel.type() == ConnectionType.SERVICE && metrics.serviceId().equals(channel.serviceId())) {
+                services.byId(metrics.serviceId()).ifPresent(service -> {
+                    service.metrics(metrics.tps(), metrics.mspt(), metrics.heapUsedMb(), metrics.heapMaxMb());
+                    events.post(new ServiceMetricsEvent(service));
+                });
+            }
 
         } else if (packet instanceof PortUnavailablePacket unavailable) {
             if (channel.type() == ConnectionType.WRAPPER && channel.name() != null) {

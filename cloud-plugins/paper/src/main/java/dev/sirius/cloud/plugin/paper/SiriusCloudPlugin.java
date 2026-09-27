@@ -16,6 +16,7 @@ import dev.sirius.cloud.protocol.packet.impl.ChatRestrictionsPacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
+import dev.sirius.cloud.protocol.packet.impl.ServiceMetricsPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServicePlayerUpdatePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceReadyPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStateUpdatePacket;
@@ -28,6 +29,9 @@ import org.bukkit.plugin.java.JavaPlugin;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
@@ -42,13 +46,23 @@ public final class SiriusCloudPlugin extends JavaPlugin implements Listener {
 
     private static final CloudLogger LOGGER = CloudLogger.of("SiriusCloud");
 
-    private static final int HEARTBEAT_TICKS = 20 * 10;
+    private static final int HEARTBEAT_SECONDS = 10;
 
     private ConnectionFile connection;
     private NetworkClient client;
     private RemoteCloudDriver driver;
 
     private final ChatGuard chatGuard = new ChatGuard();
+
+    /**
+     * The heartbeat's own thread rather than the Bukkit scheduler.
+     *
+     * <p>Folia rejects the Bukkit scheduler outright, and the heartbeat never
+     * touches world state, so it needs no server thread at all - which also
+     * means it keeps reporting while the main thread is lagging, exactly when
+     * the node most wants to hear about it.
+     */
+    private ScheduledExecutorService heartbeats;
 
     private final AtomicBoolean authenticated = new AtomicBoolean();
     private final AtomicBoolean serverLoaded = new AtomicBoolean();
@@ -102,8 +116,26 @@ public final class SiriusCloudPlugin extends JavaPlugin implements Listener {
             registered.setTabCompleter(cloudCommand);
         }
 
-        Bukkit.getScheduler().runTaskTimerAsynchronously(this, this::heartbeat,
-                HEARTBEAT_TICKS, HEARTBEAT_TICKS);
+        heartbeats = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "siriuscloud-heartbeat");
+            thread.setDaemon(true);
+            return thread;
+        });
+        heartbeats.scheduleWithFixedDelay(this::heartbeat, HEARTBEAT_SECONDS, HEARTBEAT_SECONDS, TimeUnit.SECONDS);
+
+        // Readiness from the first tick of the global region scheduler too.
+        // ServerLoadEvent is the usual signal, but the global scheduler exists
+        // on Paper, Purpur and Folia alike and its first run can only happen
+        // once the server is actually ticking - so readiness does not depend
+        // on one platform's event ordering.
+        try {
+            Bukkit.getGlobalRegionScheduler().run(this, task -> {
+                serverLoaded.set(true);
+                sendReadyIfPossible();
+            });
+        } catch (UnsupportedOperationException | NoSuchMethodError ignored) {
+            // A platform without it; ServerLoadEvent covers readiness there.
+        }
 
         getLogger().info("Connecting to node at " + connection.nodeHost() + ":" + connection.nodePort()
                 + " as " + connection.serviceName());
@@ -111,6 +143,9 @@ public final class SiriusCloudPlugin extends JavaPlugin implements Listener {
 
     @Override
     public void onDisable() {
+        if (heartbeats != null) {
+            heartbeats.shutdownNow();
+        }
         if (client == null) {
             return;
         }
@@ -158,6 +193,28 @@ public final class SiriusCloudPlugin extends JavaPlugin implements Listener {
             // every service, forever.
             client.send(new ServicePlayerUpdatePacket(
                     connection.serviceId(), Bukkit.getOnlinePlayers().size(), Bukkit.getMaxPlayers()));
+
+            Runtime runtime = Runtime.getRuntime();
+            client.send(new ServiceMetricsPacket(connection.serviceId(), tps(), mspt(),
+                    (int) ((runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024)),
+                    (int) (runtime.maxMemory() / (1024 * 1024))));
+        }
+    }
+
+    /** One-minute TPS, or -1 where the platform has none - Folia ticks per region. */
+    private static double tps() {
+        try {
+            return Math.min(20.0, Bukkit.getTPS()[0]);
+        } catch (UnsupportedOperationException | NoSuchMethodError exception) {
+            return -1;
+        }
+    }
+
+    private static double mspt() {
+        try {
+            return Bukkit.getAverageTickTime();
+        } catch (UnsupportedOperationException | NoSuchMethodError exception) {
+            return -1;
         }
     }
 

@@ -6,6 +6,8 @@ author: Sirius
 description: Connects this server to its SiriusCloud node.
 website: https://github.com/SiriusCloud-MC/SiriusCloud-MC
 load: POSTWORLD
+# Nothing here touches world state from a scheduler, so it runs on Folia as well.
+folia-supported: true
 
 # LuckPerms resolves its messaging service while it enables, so our messenger
 # has to be registered before that happens.

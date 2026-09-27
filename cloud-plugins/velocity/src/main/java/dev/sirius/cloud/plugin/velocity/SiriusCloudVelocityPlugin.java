@@ -52,6 +52,7 @@ import dev.sirius.cloud.protocol.packet.impl.ProxyDisplayPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerSnapshotPacket;
 import dev.sirius.cloud.protocol.packet.impl.PlayerSwitchServerPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceAvailabilityPacket;
+import dev.sirius.cloud.protocol.packet.impl.ServiceMetricsPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServicePlayerUpdatePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceReadyPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStateUpdatePacket;
@@ -514,6 +515,11 @@ public final class SiriusCloudVelocityPlugin {
         if (client != null && client.isConnected()) {
             client.send(new HeartbeatPacket(System.currentTimeMillis(), 0, proxy.getPlayerCount()));
             reportPlayers();
+            // A proxy has no tick rate; heap is the health figure that matters.
+            Runtime runtime = Runtime.getRuntime();
+            client.send(new ServiceMetricsPacket(connection.serviceId(), -1, -1,
+                    (int) ((runtime.totalMemory() - runtime.freeMemory()) / (1024 * 1024)),
+                    (int) (runtime.maxMemory() / (1024 * 1024))));
         }
     }
 
