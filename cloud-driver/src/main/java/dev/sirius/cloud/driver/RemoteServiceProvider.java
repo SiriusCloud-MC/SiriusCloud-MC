@@ -9,6 +9,7 @@ import dev.sirius.cloud.protocol.packet.impl.AcknowledgePacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleCommandPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceListRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceListResponsePacket;
+import dev.sirius.cloud.protocol.packet.impl.ServicePropertiesPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStartRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStartResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStopPacket;
@@ -27,11 +28,20 @@ final class RemoteServiceProvider implements ServiceProvider {
 
     private final NetworkClient client;
 
-    /** Last known state, so lookups do not need a round trip. */
+    /** The service this driver runs inside, or null on a wrapper or tool. */
+    private final UUID selfId;
+
+    /**
+     * Last known state, so lookups do not need a round trip.
+     *
+     * <p>Kept live by the node's pushes rather than refreshed by queries, so it
+     * is as current as the node's own view to within one packet.
+     */
     private final Map<UUID, ServiceInfo> cache = new ConcurrentHashMap<>();
 
-    RemoteServiceProvider(NetworkClient client) {
+    RemoteServiceProvider(NetworkClient client, UUID selfId) {
         this.client = client;
+        this.selfId = selfId;
     }
 
     @Override
@@ -90,13 +100,32 @@ final class RemoteServiceProvider implements ServiceProvider {
         });
     }
 
-    /** Updated by the driver when the node pushes state changes. */
-    void updateCache(ServiceInfo service) {
-        cache.put(service.uniqueId(), service);
+    @Override
+    public Optional<ServiceInfo> self() {
+        return selfId == null ? Optional.empty() : Optional.ofNullable(cache.get(selfId));
     }
 
-    void evictFromCache(UUID uniqueId) {
-        cache.remove(uniqueId);
+    @Override
+    public CompletableFuture<Void> updateProperties(UUID uniqueId, Map<String, String> properties) {
+        return query(new ServicePropertiesPacket(uniqueId, properties)).thenAccept(packet -> {
+            AcknowledgePacket ack = (AcknowledgePacket) packet;
+            if (!ack.success()) {
+                throw new IllegalStateException(ack.message());
+            }
+        });
+    }
+
+    /**
+     * Updated by the driver when the node pushes state changes.
+     *
+     * @return what the cache held before, so the driver can tell what changed
+     */
+    ServiceInfo updateCache(ServiceInfo service) {
+        return cache.put(service.uniqueId(), service);
+    }
+
+    ServiceInfo evictFromCache(UUID uniqueId) {
+        return cache.remove(uniqueId);
     }
 
     private CompletableFuture<Packet> query(Packet packet) {

@@ -4,6 +4,8 @@ import dev.sirius.cloud.api.event.EventManager;
 import dev.sirius.cloud.api.event.events.ServiceCreatedEvent;
 import dev.sirius.cloud.api.event.events.ServiceRemovedEvent;
 import dev.sirius.cloud.api.event.events.ServiceStateChangedEvent;
+import dev.sirius.cloud.api.event.events.ServiceUpdatedEvent;
+import dev.sirius.cloud.api.service.ServiceProperties;
 import dev.sirius.cloud.api.group.ServiceGroup;
 import dev.sirius.cloud.api.logging.CloudLogger;
 import dev.sirius.cloud.api.service.ServiceId;
@@ -179,6 +181,31 @@ public final class ServiceManager {
         services.byId(uniqueId).ifPresent(service ->
                 wrappers.byName(service.wrapperName()).ifPresent(wrapper ->
                         wrapper.send(new ConsoleCommandPacket(uniqueId, command))));
+    }
+
+    /**
+     * Merges properties into a service and announces the change.
+     *
+     * @param trusted whether reserved {@code cloud:} keys may be written; only
+     *                the node itself is trusted with those
+     */
+    public CompletableFuture<Void> updateProperties(UUID uniqueId, Map<String, String> change, boolean trusted) {
+        Optional<ServiceInfo> service = services.byId(uniqueId);
+        if (service.isEmpty()) {
+            return CompletableFuture.failedFuture(new IllegalArgumentException("Unknown service " + uniqueId));
+        }
+        if (!trusted) {
+            for (String key : change.keySet()) {
+                if (key != null && key.startsWith(ServiceProperties.RESERVED_PREFIX)) {
+                    return CompletableFuture.failedFuture(new IllegalArgumentException(
+                            "'" + key + "' is reserved for the node"));
+                }
+            }
+        }
+        if (service.get().applyProperties(change)) {
+            events.post(new ServiceUpdatedEvent(service.get()));
+        }
+        return CompletableFuture.completedFuture(null);
     }
 
     /** Whether this is the credential issued to that service. */

@@ -2,6 +2,7 @@ package dev.sirius.cloud.node.network;
 
 import dev.sirius.cloud.api.event.EventManager;
 import dev.sirius.cloud.api.event.events.ServiceCreatedEvent;
+import dev.sirius.cloud.api.event.events.ServiceUpdatedEvent;
 import dev.sirius.cloud.api.event.events.WrapperConnectedEvent;
 import dev.sirius.cloud.api.event.events.WrapperDisconnectedEvent;
 import dev.sirius.cloud.api.logging.CloudLogger;
@@ -15,6 +16,7 @@ import dev.sirius.cloud.api.service.ServiceInfo;
 import dev.sirius.cloud.api.service.ServiceState;
 import dev.sirius.cloud.api.service.ServiceType;
 import dev.sirius.cloud.node.LocalCloudDriver;
+import dev.sirius.cloud.node.LocalMessagingProvider;
 import dev.sirius.cloud.node.config.NodeConfig;
 import dev.sirius.cloud.node.group.GroupRegistry;
 import dev.sirius.cloud.node.player.PlayerManager;
@@ -31,6 +33,8 @@ import dev.sirius.cloud.protocol.packet.ConnectionType;
 import dev.sirius.cloud.protocol.packet.Packet;
 import dev.sirius.cloud.protocol.packet.impl.AcknowledgePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChannelMessagePacket;
+import dev.sirius.cloud.protocol.packet.impl.ChannelSubscriptionsPacket;
+import dev.sirius.cloud.protocol.packet.impl.ServicePropertiesPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleCommandPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleHistoryPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleLinePacket;
@@ -215,10 +219,18 @@ public final class NodePacketHandler implements PacketHandler {
 
         } else if (packet instanceof ServicePlayerUpdatePacket update) {
             services.byId(update.serviceId()).ifPresent(service -> {
+                boolean occupancyChanged = service.playerCount() != update.playerCount();
                 service.playerCount(update.playerCount());
 
                 boolean capacityChanged = service.maxPlayers() != update.maxPlayers();
                 service.maxPlayers(update.maxPlayers());
+
+                // Only announced when it moved: every service reports on a
+                // heartbeat, and re-sending an unchanged count to every other
+                // service every ten seconds is traffic nobody asked for.
+                if (occupancyChanged || capacityChanged) {
+                    events.post(new ServiceUpdatedEvent(service));
+                }
 
                 // A backend whose slot count moved changes what every proxy
                 // should be advertising, so they are told again.
@@ -245,10 +257,24 @@ public final class NodePacketHandler implements PacketHandler {
                     ? channel.name()
                     : "node";
             message.sourceService(source);
+            routeChannelMessage(message, channel, source);
 
-            serviceChannels.broadcastToServices(message, channel.serviceId());
-            driver.deliverChannelMessage(new ChannelMessage(
-                    message.channel(), message.payload(), source));
+        } else if (packet instanceof ChannelSubscriptionsPacket subscribe) {
+            if (channel.serviceId() != null) {
+                serviceChannels.subscriptions(channel.serviceId(), subscribe.channels());
+            }
+
+        } else if (packet instanceof ServicePropertiesPacket properties) {
+            // A service speaks for itself and nobody else. Without this check any
+            // server could mark a rival INGAME and have matchmaking skip it.
+            if (channel.type() == ConnectionType.SERVICE
+                    && !properties.serviceId().equals(channel.serviceId())) {
+                channel.respond(properties, AcknowledgePacket.fail(
+                        "A service may only change its own properties"));
+                return;
+            }
+            serviceManager.updateProperties(properties.serviceId(), properties.properties(), false)
+                    .whenComplete((ignored, error) -> acknowledge(channel, properties, error));
 
         } else if (packet instanceof ConsoleLinePacket line) {
             // Only reaches a console that asked for it; see AttachCommand.
@@ -312,9 +338,35 @@ public final class NodePacketHandler implements PacketHandler {
         }
     }
 
+    /**
+     * Delivers a published message to its audience.
+     *
+     * <p>Without a target it goes to every subscriber except the publisher, and
+     * to the node's own handlers. With one it goes to that recipient only - the
+     * point of targeting is that nobody else sees it.
+     */
+    private void routeChannelMessage(ChannelMessagePacket message, NetworkChannel from, String source) {
+        ChannelMessage delivered = new ChannelMessage(message.channel(), message.payload(), source);
+        String target = message.target();
+
+        if (target == null || target.isBlank()) {
+            serviceChannels.publish(message, from.serviceId());
+            driver.deliverChannelMessage(delivered);
+            return;
+        }
+        if (LocalMessagingProvider.NODE_SOURCE.equalsIgnoreCase(target)) {
+            driver.deliverChannelMessage(delivered);
+            return;
+        }
+        services.byName(target).ifPresentOrElse(
+                recipient -> serviceChannels.sendTo(recipient.uniqueId(), message),
+                () -> LOGGER.debug("Dropping a message for unknown service {}", target));
+    }
+
     /** Whether a packet changes cloud state, as opposed to reading it. */
     private static boolean mutates(Packet packet) {
-        return packet instanceof ServiceStartRequestPacket
+        return packet instanceof ServicePropertiesPacket
+                || packet instanceof ServiceStartRequestPacket
                 || packet instanceof ServiceStopPacket
                 || packet instanceof ConsoleCommandPacket
                 || packet instanceof PlayerConnectRequestPacket

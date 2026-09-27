@@ -21,13 +21,25 @@ public final class ChannelMessagePacket extends Packet {
     private String payload;
     private String sourceService;
 
+    /** One recipient by service name, {@code "node"}, or null for every subscriber. */
+    private String target;
+
     public ChannelMessagePacket() {
     }
 
     public ChannelMessagePacket(String channel, String payload, String sourceService) {
+        this(channel, payload, sourceService, null);
+    }
+
+    public ChannelMessagePacket(String channel, String payload, String sourceService, String target) {
         this.channel = channel;
         this.payload = payload;
         this.sourceService = sourceService;
+        this.target = target;
+    }
+
+    public String target() {
+        return target;
     }
 
     public String channel() {
@@ -50,7 +62,8 @@ public final class ChannelMessagePacket extends Packet {
     public void write(DataBuf buf) {
         buf.writeString(channel == null ? "" : channel)
                 .writeString(payload())
-                .writeString(sourceService());
+                .writeString(sourceService())
+                .writeNullable(target, DataBuf::writeString);
     }
 
     @Override
@@ -58,5 +71,6 @@ public final class ChannelMessagePacket extends Packet {
         this.channel = buf.readString();
         this.payload = buf.readString();
         this.sourceService = buf.readString();
+        this.target = buf.readNullable(DataBuf::readString);
     }
 }

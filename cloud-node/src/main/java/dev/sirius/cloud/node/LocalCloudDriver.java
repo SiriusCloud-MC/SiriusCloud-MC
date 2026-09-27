@@ -26,6 +26,7 @@ import dev.sirius.cloud.api.platform.Platform;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -67,7 +68,7 @@ public final class LocalCloudDriver implements CloudDriver {
         this.playerManager = playerManager;
         this.wrapperRegistry = wrapperRegistry;
         this.config = config;
-        this.messaging = new LocalMessagingProvider(serviceChannels);
+        this.messaging = new LocalMessagingProvider(serviceChannels, serviceRegistry);
     }
 
     /** The node's own description, rebuilt per call so the counters are current. */
@@ -125,6 +126,18 @@ public final class LocalCloudDriver implements CloudDriver {
             public CompletableFuture<Void> dispatchCommand(UUID uniqueId, String command) {
                 serviceManager.dispatchCommand(uniqueId, command);
                 return CompletableFuture.completedFuture(null);
+            }
+
+            @Override
+            public Optional<ServiceInfo> self() {
+                return Optional.empty();
+            }
+
+            @Override
+            public CompletableFuture<Void> updateProperties(UUID uniqueId, Map<String, String> properties) {
+                // The node's own driver is trusted with reserved keys; modules
+                // run here, and draining a service is exactly their business.
+                return serviceManager.updateProperties(uniqueId, properties, true);
             }
         };
     }

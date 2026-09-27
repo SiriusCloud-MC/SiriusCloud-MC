@@ -2,6 +2,9 @@ package dev.sirius.cloud.protocol.packet;
 
 import dev.sirius.cloud.protocol.packet.impl.AcknowledgePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChannelMessagePacket;
+import dev.sirius.cloud.protocol.packet.impl.ServiceUpdatePacket;
+import dev.sirius.cloud.protocol.packet.impl.ServicePropertiesPacket;
+import dev.sirius.cloud.protocol.packet.impl.ChannelSubscriptionsPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleCommandPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleHistoryPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleLinePacket;
@@ -102,6 +105,7 @@ public final class PacketRegistry {
                 .register(0x12, ConsoleCommandPacket.class, ConsoleCommandPacket::new)
                 .register(0x13, ConsoleSubscribePacket.class, ConsoleSubscribePacket::new)
                 .register(0x14, ServiceAvailabilityPacket.class, ServiceAvailabilityPacket::new)
+                .register(0x15, ServiceUpdatePacket.class, ServiceUpdatePacket::new)
 
                 // 0x20-0x2F — wrapper/service to node
                 .register(0x20, ServiceStateUpdatePacket.class, ServiceStateUpdatePacket::new)
@@ -111,6 +115,7 @@ public final class PacketRegistry {
                 .register(0x24, ServiceCrashReportPacket.class, ServiceCrashReportPacket::new)
                 .register(0x25, ServicePlayerUpdatePacket.class, ServicePlayerUpdatePacket::new)
                 .register(0x26, ServiceSnapshotPacket.class, ServiceSnapshotPacket::new)
+                .register(0x27, ServicePropertiesPacket.class, ServicePropertiesPacket::new)
 
                 // 0x30-0x3F — driver queries
                 .register(0x30, ServiceListRequestPacket.class, ServiceListRequestPacket::new)
@@ -134,6 +139,7 @@ public final class PacketRegistry {
                 .register(0x48, PlayerListResponsePacket.class, PlayerListResponsePacket::new)
 
                 // 0x50-0x5F - cloud-wide messaging
-                .register(0x50, ChannelMessagePacket.class, ChannelMessagePacket::new);
+                .register(0x50, ChannelMessagePacket.class, ChannelMessagePacket::new)
+                .register(0x51, ChannelSubscriptionsPacket.class, ChannelSubscriptionsPacket::new);
     }
 }

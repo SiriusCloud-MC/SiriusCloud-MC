@@ -24,6 +24,9 @@ import java.util.function.Consumer;
  * That is the right trade for permission syncs and chat notices, and the wrong
  * one for anything that must not be missed.
  *
+ * <p>Messages are only delivered to services that subscribed to the channel,
+ * so an unrelated server never sees traffic it has no handler for.
+ *
  * <p>A publisher does <strong>not</strong> receive its own message back.
  * Echoing would make the common "apply locally, then tell everyone else"
  * pattern apply twice.
@@ -32,6 +35,19 @@ public interface MessagingProvider {
 
     /** Sends a message to every other connected service, and to the node. */
     CompletableFuture<Void> publish(String channel, String payload);
+
+    /**
+     * Sends a message to one recipient only.
+     *
+     * <p>{@code target} is a service name, or {@link #NODE} for handlers running
+     * on the node itself. Anything addressed to one party should use this rather
+     * than {@link #publish}: a private message or a single player's command
+     * result has no business reaching every server in the cloud.
+     */
+    CompletableFuture<Void> publishTo(String target, String channel, String payload);
+
+    /** The {@link #publishTo} target that means "the node". */
+    String NODE = "node";
 
     /**
      * Registers a handler for a channel.

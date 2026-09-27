@@ -36,7 +36,6 @@ import dev.sirius.cloud.protocol.connection.PacketHandler;
 import dev.sirius.cloud.protocol.packet.ConnectionType;
 import dev.sirius.cloud.protocol.packet.Packet;
 import dev.sirius.cloud.protocol.packet.PacketRegistry;
-import dev.sirius.cloud.protocol.packet.impl.ChannelMessagePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
@@ -152,10 +151,13 @@ public final class SiriusCloudVelocityPlugin {
                 new ServerCommand(proxy));
 
         client = new NetworkClient(PacketRegistry.standard());
-        client.connect(connection.nodeHost(), connection.nodePort(), new ProxyPacketHandler());
 
-        driver = new RemoteCloudDriver("SERVICE", client);
+        // Built before connecting: the handler routes packets into it, and a
+        // handshake that completes quickly would otherwise find it null.
+        driver = new RemoteCloudDriver("SERVICE", client, connection.serviceId());
         CloudDriver.bind(driver);
+
+        client.connect(connection.nodeHost(), connection.nodePort(), new ProxyPacketHandler());
 
         CloudDriver.instance().messaging().subscribe(NOTIFY_CHANNEL, this::showNotification);
 
@@ -516,9 +518,7 @@ public final class SiriusCloudVelocityPlugin {
 
         @Override
         public void onPacket(NetworkChannel channel, Packet packet) {
-            if (packet instanceof ChannelMessagePacket message) {
-                driver.deliverChannelMessage(new ChannelMessage(
-                        message.channel(), message.payload(), message.sourceService()));
+            if (driver.handle(packet)) {
                 return;
             }
 
@@ -526,6 +526,7 @@ public final class SiriusCloudVelocityPlugin {
                 if (response.accepted()) {
                     channel.authenticated(true);
                     authenticated.set(true);
+                    driver.onAuthenticated();
                     sendReadyIfPossible();
 
                     // Whoever is already online would otherwise be invisible to

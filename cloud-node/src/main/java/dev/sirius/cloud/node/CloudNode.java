@@ -2,7 +2,9 @@ package dev.sirius.cloud.node;
 
 import dev.sirius.cloud.api.driver.CloudDriver;
 import dev.sirius.cloud.api.event.EventManager;
+import dev.sirius.cloud.api.event.events.ServiceCreatedEvent;
 import dev.sirius.cloud.api.event.events.ServiceRemovedEvent;
+import dev.sirius.cloud.api.event.events.ServiceUpdatedEvent;
 import dev.sirius.cloud.api.event.events.ServiceStateChangedEvent;
 import dev.sirius.cloud.api.logging.CloudLogger;
 import dev.sirius.cloud.api.platform.Platform;
@@ -49,6 +51,7 @@ import dev.sirius.cloud.node.wrapper.WrapperRegistry;
 import dev.sirius.cloud.protocol.connection.NetworkServer;
 import dev.sirius.cloud.protocol.packet.PacketRegistry;
 import dev.sirius.cloud.protocol.packet.impl.ServiceAvailabilityPacket;
+import dev.sirius.cloud.protocol.packet.impl.ServiceUpdatePacket;
 
 import java.io.IOException;
 import java.nio.file.Files;
@@ -180,6 +183,15 @@ public final class CloudNode {
             }
         });
 
+        // Every service is told about every other one as it changes, so a
+        // plugin's view of the cloud is live and its own event bus fires the
+        // same lifecycle events this one does. Sign walls and matchmaking are
+        // built on exactly this.
+        events.subscribe(ServiceCreatedEvent.class, event -> pushServiceUpdate(event.service(), false));
+        events.subscribe(ServiceStateChangedEvent.class, event -> pushServiceUpdate(event.service(), false));
+        events.subscribe(ServiceUpdatedEvent.class, event -> pushServiceUpdate(event.service(), false));
+        events.subscribe(ServiceRemovedEvent.class, event -> pushServiceUpdate(event.service(), true));
+
         // A server that has gone must be dropped from every proxy, or players
         // keep being routed to a port with nothing behind it.
         events.subscribe(ServiceRemovedEvent.class, event -> {
@@ -215,6 +227,10 @@ public final class CloudNode {
 
         // Blocks this thread until the console exits.
         console.run(this::shutdown);
+    }
+
+    private void pushServiceUpdate(ServiceInfo service, boolean removed) {
+        serviceChannels.broadcastToServices(new ServiceUpdatePacket(service, removed), null);
     }
 
     /**

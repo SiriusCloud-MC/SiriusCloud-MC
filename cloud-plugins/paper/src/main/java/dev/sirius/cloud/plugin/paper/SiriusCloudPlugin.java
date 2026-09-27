@@ -2,7 +2,6 @@ package dev.sirius.cloud.plugin.paper;
 
 import dev.sirius.cloud.api.driver.CloudDriver;
 import dev.sirius.cloud.api.logging.CloudLogger;
-import dev.sirius.cloud.api.messaging.ChannelMessage;
 import dev.sirius.cloud.api.platform.Platform;
 import dev.sirius.cloud.api.service.ServiceState;
 import dev.sirius.cloud.driver.RemoteCloudDriver;
@@ -13,7 +12,6 @@ import dev.sirius.cloud.protocol.connection.PacketHandler;
 import dev.sirius.cloud.protocol.packet.ConnectionType;
 import dev.sirius.cloud.protocol.packet.Packet;
 import dev.sirius.cloud.protocol.packet.PacketRegistry;
-import dev.sirius.cloud.protocol.packet.impl.ChannelMessagePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
@@ -83,10 +81,13 @@ public final class SiriusCloudPlugin extends JavaPlugin implements Listener {
         getServer().getPluginManager().registerEvents(this, this);
 
         client = new NetworkClient(PacketRegistry.standard());
-        client.connect(connection.nodeHost(), connection.nodePort(), new ServicePacketHandler());
 
-        driver = new RemoteCloudDriver("SERVICE", client);
+        // Built before connecting: the handler routes packets into it, and a
+        // handshake that completes quickly would otherwise find it null.
+        driver = new RemoteCloudDriver("SERVICE", client, connection.serviceId());
         CloudDriver.bind(driver);
+
+        client.connect(connection.nodeHost(), connection.nodePort(), new ServicePacketHandler());
 
         CloudNotifications.register();
 
@@ -171,9 +172,7 @@ public final class SiriusCloudPlugin extends JavaPlugin implements Listener {
 
         @Override
         public void onPacket(NetworkChannel channel, Packet packet) {
-            if (packet instanceof ChannelMessagePacket message) {
-                driver.deliverChannelMessage(new ChannelMessage(
-                        message.channel(), message.payload(), message.sourceService()));
+            if (driver.handle(packet)) {
                 return;
             }
 
@@ -181,6 +180,7 @@ public final class SiriusCloudPlugin extends JavaPlugin implements Listener {
                 if (response.accepted()) {
                     channel.authenticated(true);
                     authenticated.set(true);
+                    driver.onAuthenticated();
                     sendReadyIfPossible();
                 } else {
                     getLogger().warning("The node rejected this service: " + response.message());
