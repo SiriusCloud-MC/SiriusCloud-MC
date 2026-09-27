@@ -123,6 +123,41 @@ public final class ServiceGroup {
      */
     private boolean rolloutOnTemplateChange = true;
 
+    /** Scheduled backups; see {@link Backup}. */
+    private Backup backup = new Backup();
+
+    /**
+     * Scheduled backups of a group's services, as zip archives on their wrapper.
+     *
+     * <p>Only meaningful for static groups: a dynamic service's directory is
+     * rebuilt from its template on every start, so there is nothing in it worth
+     * keeping. Any running service can still be backed up by hand.
+     */
+    public static final class Backup {
+
+        /** Minutes between backups; 0 for none. */
+        private int intervalMinutes = 0;
+
+        /** How many to keep per service, oldest removed first. */
+        private int keep = 5;
+
+        public int intervalMinutes() {
+            return Math.max(0, intervalMinutes);
+        }
+
+        public void intervalMinutes(int intervalMinutes) {
+            this.intervalMinutes = intervalMinutes;
+        }
+
+        public int keep() {
+            return keep < 1 ? 5 : keep;
+        }
+
+        public void keep(int keep) {
+            this.keep = keep;
+        }
+    }
+
     /**
      * Automatic scaling. SERVER groups only: a proxy's address is fixed, and a
      * second one on the next port along is no help to anybody.
@@ -314,6 +349,13 @@ public final class ServiceGroup {
 
     public void startTimeoutSeconds(int startTimeoutSeconds) {
         this.startTimeoutSeconds = startTimeoutSeconds;
+    }
+
+    public Backup backup() {
+        if (backup == null) {
+            backup = new Backup();
+        }
+        return backup;
     }
 
     public Autoscale autoscale() {

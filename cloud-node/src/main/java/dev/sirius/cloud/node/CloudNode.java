@@ -16,6 +16,7 @@ import dev.sirius.cloud.driver.event.DefaultEventManager;
 import dev.sirius.cloud.driver.paper.PaperVersionCatalog;
 import dev.sirius.cloud.node.command.CommandManager;
 import dev.sirius.cloud.node.command.commands.AttachCommand;
+import dev.sirius.cloud.node.command.commands.BackupCommand;
 import dev.sirius.cloud.node.command.commands.BroadcastCommand;
 import dev.sirius.cloud.node.command.commands.EditCommand;
 import dev.sirius.cloud.node.command.commands.ExecuteCommand;
@@ -49,6 +50,7 @@ import dev.sirius.cloud.node.network.NodePacketHandler;
 import dev.sirius.cloud.node.player.PlayerManager;
 import dev.sirius.cloud.node.player.PlayerRegistry;
 import dev.sirius.cloud.node.provisioning.AutoScaler;
+import dev.sirius.cloud.node.provisioning.BackupScheduler;
 import dev.sirius.cloud.node.provisioning.GroupBackoff;
 import dev.sirius.cloud.node.provisioning.Rollouts;
 import dev.sirius.cloud.node.provisioning.ProvisioningTask;
@@ -107,6 +109,7 @@ public final class CloudNode {
     private final GroupBackoff backoff = new GroupBackoff();
     private final AutoScaler autoScaler = new AutoScaler();
     private final Rollouts rollouts;
+    private final BackupScheduler backups;
 
     private final ScheduledExecutorService scheduler = Executors.newSingleThreadScheduledExecutor(runnable -> {
         Thread thread = new Thread(runnable, "sirius-scheduler");
@@ -137,6 +140,7 @@ public final class CloudNode {
         this.serviceManager = new ServiceManager(config, groups, services, wrappers, events);
         this.playerManager = new PlayerManager(players, services, serviceChannels);
         this.rollouts = new Rollouts(groups, services, serviceManager, players, playerManager);
+        this.backups = new BackupScheduler(groups, services, wrappers);
 
         instance = this;
     }
@@ -261,7 +265,10 @@ public final class CloudNode {
             }
         });
 
-        events.subscribe(ServiceRemovedEvent.class, event -> autoScaler.forget(event.service().uniqueId()));
+        events.subscribe(ServiceRemovedEvent.class, event -> {
+            autoScaler.forget(event.service().uniqueId());
+            backups.forget(event.service().uniqueId());
+        });
 
         NodePacketHandler packetHandler = new NodePacketHandler(
                 config, serviceManager, services, groups, wrappers, events, console,
@@ -292,6 +299,7 @@ public final class CloudNode {
         // turn a busy counter into a busy disk.
         scheduler.scheduleWithFixedDelay(store::flush, 5, 5, TimeUnit.SECONDS);
         scheduler.scheduleWithFixedDelay(gateway::tick, 1, 1, TimeUnit.SECONDS);
+        scheduler.scheduleWithFixedDelay(backups::tick, 30, 30, TimeUnit.SECONDS);
 
         Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "sirius-shutdown"));
 
@@ -415,6 +423,7 @@ public final class CloudNode {
         commands.register(new StopCommand(services, serviceManager));
         commands.register(new RestartCommand(services, serviceManager));
         commands.register(new RolloutCommand(rollouts, groups));
+        commands.register(new BackupCommand(services, backups));
         commands.register(new EditCommand(groups));
         commands.register(new MaintenanceCommand(groups));
         commands.register(new ReloadCommand(groups));

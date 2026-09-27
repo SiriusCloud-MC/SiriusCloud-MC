@@ -26,7 +26,8 @@ public final class EditCommand implements Command {
     private static final List<String> FIELDS = List.of(
             "memory", "minmemory", "min", "max", "maxplayers",
             "version", "build", "port", "static", "fallback", "java",
-            "timeout", "autoscale", "scaleup", "scaledown", "maxuptime", "rollout", "software", "cpus");
+            "timeout", "autoscale", "scaleup", "scaledown", "maxuptime", "rollout", "software", "cpus",
+            "backup", "keep");
 
     private final GroupRegistry groups;
 
@@ -91,6 +92,8 @@ public final class EditCommand implements Command {
                         .orElseThrow(() -> new IllegalArgumentException(
                                 "'" + value + "' is not paper, purpur, folia, fabric or velocity")));
                 case "cpus" -> group.cpuLimit(cores(value));
+                case "backup" -> group.backup().intervalMinutes(whole(value));
+                case "keep" -> group.backup().keep(positive(value));
                 default -> {
                     LOGGER.warn("Unknown field '{}'. One of: {}", field, String.join(", ", FIELDS));
                     return;

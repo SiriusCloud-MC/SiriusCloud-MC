@@ -8,6 +8,7 @@ import dev.sirius.cloud.protocol.connection.NetworkChannel;
 import dev.sirius.cloud.protocol.connection.PacketHandler;
 import dev.sirius.cloud.protocol.packet.ConnectionType;
 import dev.sirius.cloud.protocol.packet.Packet;
+import dev.sirius.cloud.protocol.packet.impl.BackupRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleCommandPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleSubscribePacket;
 import dev.sirius.cloud.protocol.packet.impl.HandshakePacket;
@@ -28,6 +29,13 @@ public final class WrapperPacketHandler implements PacketHandler {
     private final ServiceProcessManager processes;
     private final Consumer<Boolean> connectionStateSink;
     private final Runnable onAuthenticationRejected;
+
+    /** Handed backup requests; set by the wrapper, which owns the backup manager. */
+    private volatile java.util.function.Consumer<BackupRequestPacket> backups = request -> { };
+
+    public void onBackupRequest(java.util.function.Consumer<BackupRequestPacket> backups) {
+        this.backups = backups;
+    }
 
     public WrapperPacketHandler(WrapperConfig config,
                                 ServiceProcessManager processes,
@@ -92,6 +100,9 @@ public final class WrapperPacketHandler implements PacketHandler {
 
         } else if (packet instanceof ConsoleCommandPacket command) {
             processes.sendCommand(command.serviceId(), command.command());
+
+        } else if (packet instanceof BackupRequestPacket backup) {
+            backups.accept(backup);
 
         } else if (packet instanceof ConsoleSubscribePacket subscribe) {
             processes.setConsoleSubscribed(subscribe.serviceId(), subscribe.subscribe());

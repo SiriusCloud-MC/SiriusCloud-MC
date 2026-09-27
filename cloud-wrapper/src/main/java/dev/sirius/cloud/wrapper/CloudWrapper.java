@@ -27,6 +27,7 @@ import dev.sirius.cloud.wrapper.jar.JarResolver;
 import dev.sirius.cloud.wrapper.java.JavaRuntime;
 import dev.sirius.cloud.wrapper.java.JavaRuntimeResolver;
 import dev.sirius.cloud.wrapper.network.WrapperPacketHandler;
+import dev.sirius.cloud.wrapper.process.BackupManager;
 import dev.sirius.cloud.wrapper.process.DirectLauncher;
 import dev.sirius.cloud.wrapper.process.DockerLauncher;
 import dev.sirius.cloud.wrapper.process.ServiceLauncher;
@@ -178,6 +179,10 @@ public final class CloudWrapper {
         WrapperPacketHandler handler = new WrapperPacketHandler(
                 config, processes, connected -> {
                 }, this::onAuthenticationRejected);
+
+        BackupManager backups = new BackupManager(
+                workingDirectory.resolve("local").resolve("backups"), processes, client::send);
+        handler.onBackupRequest(request -> backups.backup(request.serviceId(), request.keep()));
 
         client.connect(config.nodeHost(), config.nodePort(), handler);
 

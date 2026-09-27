@@ -4,6 +4,7 @@ import dev.sirius.cloud.api.event.EventManager;
 import dev.sirius.cloud.api.event.events.ServiceCreatedEvent;
 import dev.sirius.cloud.api.event.events.ServiceUpdatedEvent;
 import dev.sirius.cloud.api.event.events.ServiceMetricsEvent;
+import dev.sirius.cloud.api.event.events.BackupCompletedEvent;
 import dev.sirius.cloud.api.event.events.WrapperConnectedEvent;
 import dev.sirius.cloud.api.event.events.WrapperDisconnectedEvent;
 import dev.sirius.cloud.api.logging.CloudLogger;
@@ -35,6 +36,7 @@ import dev.sirius.cloud.protocol.packet.Packet;
 import dev.sirius.cloud.protocol.packet.impl.AcknowledgePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChannelMessagePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChannelSubscriptionsPacket;
+import dev.sirius.cloud.protocol.packet.impl.BackupResultPacket;
 import dev.sirius.cloud.protocol.packet.impl.PortUnavailablePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceMetricsPacket;
 import dev.sirius.cloud.protocol.packet.impl.TemplateChangedPacket;
@@ -327,6 +329,17 @@ public final class NodePacketHandler implements PacketHandler {
                     events.post(new ServiceMetricsEvent(service));
                 });
             }
+
+        } else if (packet instanceof BackupResultPacket backup) {
+            if (backup.success()) {
+                LOGGER.info("Backed up {} on {} ({} MB){}", backup.serviceName(), channel.name(),
+                        backup.sizeBytes() / (1024 * 1024),
+                        backup.message().isEmpty() ? "" : " - " + backup.message());
+            } else {
+                LOGGER.warn("Backup of {} on {} failed: {}", backup.serviceName(), channel.name(), backup.message());
+            }
+            events.post(new BackupCompletedEvent(backup.serviceName(), channel.name(), backup.success(),
+                    backup.file(), backup.sizeBytes(), backup.message()));
 
         } else if (packet instanceof PortUnavailablePacket unavailable) {
             if (channel.type() == ConnectionType.WRAPPER && channel.name() != null) {

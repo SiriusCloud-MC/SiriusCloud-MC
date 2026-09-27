@@ -2,6 +2,8 @@ package dev.sirius.cloud.protocol.packet;
 
 import dev.sirius.cloud.protocol.packet.impl.AcknowledgePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChannelMessagePacket;
+import dev.sirius.cloud.protocol.packet.impl.BackupResultPacket;
+import dev.sirius.cloud.protocol.packet.impl.BackupRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceMetricsPacket;
 import dev.sirius.cloud.protocol.packet.impl.TemplateChangedPacket;
 import dev.sirius.cloud.protocol.packet.impl.PortUnavailablePacket;
@@ -121,6 +123,7 @@ public final class PacketRegistry {
                 .register(0x13, ConsoleSubscribePacket.class, ConsoleSubscribePacket::new)
                 .register(0x14, ServiceAvailabilityPacket.class, ServiceAvailabilityPacket::new)
                 .register(0x15, ServiceUpdatePacket.class, ServiceUpdatePacket::new)
+                .register(0x16, BackupRequestPacket.class, BackupRequestPacket::new)
 
                 // 0x20-0x2F — wrapper/service to node
                 .register(0x20, ServiceStateUpdatePacket.class, ServiceStateUpdatePacket::new)
@@ -134,6 +137,7 @@ public final class PacketRegistry {
                 .register(0x28, PortUnavailablePacket.class, PortUnavailablePacket::new)
                 .register(0x29, TemplateChangedPacket.class, TemplateChangedPacket::new)
                 .register(0x2A, ServiceMetricsPacket.class, ServiceMetricsPacket::new)
+                .register(0x2B, BackupResultPacket.class, BackupResultPacket::new)
 
                 // 0x30-0x3F — driver queries
                 .register(0x30, ServiceListRequestPacket.class, ServiceListRequestPacket::new)
