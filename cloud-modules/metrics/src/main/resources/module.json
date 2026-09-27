@@ -1,0 +1,8 @@
+{
+  "id": "metrics",
+  "version": "1.0.0",
+  "main": "dev.sirius.cloud.module.metrics.MetricsModule",
+  "apiVersion": "1.0.0",
+  "description": "Prometheus metrics for services, players and machines",
+  "authors": ["Sirius"]
+}

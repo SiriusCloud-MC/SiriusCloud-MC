@@ -24,9 +24,11 @@ public final class MaintenanceCommand implements Command {
     private static final CloudLogger LOGGER = CloudLogger.of("Console");
 
     private final GroupRegistry groups;
+    private final dev.sirius.cloud.node.command.CommandManager commands;
 
-    public MaintenanceCommand(GroupRegistry groups) {
+    public MaintenanceCommand(GroupRegistry groups, dev.sirius.cloud.node.command.CommandManager commands) {
         this.groups = groups;
+        this.commands = commands;
     }
 
     @Override
@@ -41,7 +43,7 @@ public final class MaintenanceCommand implements Command {
 
     @Override
     public String usage() {
-        return "maintenance <group> [on|off]";
+        return "maintenance <group> [on|off]  |  maintenance on|off|add|remove|list";
     }
 
     @Override
@@ -59,6 +61,12 @@ public final class MaintenanceCommand implements Command {
 
         Optional<ServiceGroup> found = groups.byName(args[0]);
         if (found.isEmpty()) {
+            // Not a group, so perhaps the network-wide maintenance a module
+            // provides: 'maintenance on' should reach it from here too rather
+            // than being answered with "no group named on".
+            if (commands.fallback().map(fallback -> fallback.dispatch("maintenance", args)).orElse(false)) {
+                return;
+            }
             LOGGER.warn("No group named '{}'. Try 'groups'.", args[0]);
             return;
         }

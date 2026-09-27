@@ -1,0 +1,8 @@
+{
+  "id": "moderation",
+  "version": "1.0.0",
+  "main": "dev.sirius.cloud.module.moderation.ModerationModule",
+  "apiVersion": "1.0.0",
+  "description": "Bans, mutes, kicks and staff tools across the network",
+  "authors": ["Sirius"]
+}

@@ -425,7 +425,7 @@ public final class CloudNode {
         commands.register(new RolloutCommand(rollouts, groups));
         commands.register(new BackupCommand(services, backups));
         commands.register(new EditCommand(groups));
-        commands.register(new MaintenanceCommand(groups));
+        commands.register(new MaintenanceCommand(groups, commands));
         commands.register(new ReloadCommand(groups));
         commands.register(new ExecuteCommand(services, serviceManager));
         commands.register(new AttachCommand(services, serviceManager, console));

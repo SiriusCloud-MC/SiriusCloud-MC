@@ -1,0 +1,8 @@
+{
+  "id": "discord",
+  "version": "1.0.0",
+  "main": "dev.sirius.cloud.module.discord.DiscordModule",
+  "apiVersion": "1.0.0",
+  "description": "Posts cloud events to a Discord webhook",
+  "authors": ["Sirius"]
+}

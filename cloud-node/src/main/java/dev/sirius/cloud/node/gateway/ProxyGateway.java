@@ -280,6 +280,15 @@ public final class ProxyGateway implements NetworkProvider {
         return CompletableFuture.completedFuture(null);
     }
 
+    @Override
+    public boolean isChatRestricted(UUID player) {
+        ChatRestrictionsPacket.Restriction restriction = restrictions.get(player);
+        if (restriction == null) {
+            return false;
+        }
+        return restriction.untilMillis() == 0 || restriction.untilMillis() > System.currentTimeMillis();
+    }
+
     private void pushRestrictions() {
         ChatRestrictionsPacket packet = restrictionsPacket();
         for (UUID serviceId : channels.connectedServices()) {

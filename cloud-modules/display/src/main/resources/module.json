@@ -1,0 +1,8 @@
+{
+  "id": "display",
+  "version": "1.0.0",
+  "main": "dev.sirius.cloud.module.display.DisplayModule",
+  "apiVersion": "1.0.0",
+  "description": "Server list, tab list and network-wide maintenance mode",
+  "authors": ["Sirius"]
+}

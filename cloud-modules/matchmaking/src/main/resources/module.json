@@ -1,0 +1,8 @@
+{
+  "id": "matchmaking",
+  "version": "1.0.0",
+  "main": "dev.sirius.cloud.module.matchmaking.MatchmakingModule",
+  "apiVersion": "1.0.0",
+  "description": "Queues that place players and parties on joinable game servers",
+  "authors": ["Sirius"]
+}

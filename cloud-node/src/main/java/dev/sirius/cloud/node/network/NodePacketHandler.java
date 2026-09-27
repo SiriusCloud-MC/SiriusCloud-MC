@@ -5,6 +5,7 @@ import dev.sirius.cloud.api.event.events.ServiceCreatedEvent;
 import dev.sirius.cloud.api.event.events.ServiceUpdatedEvent;
 import dev.sirius.cloud.api.event.events.ServiceMetricsEvent;
 import dev.sirius.cloud.api.event.events.BackupCompletedEvent;
+import dev.sirius.cloud.api.event.events.ServiceCrashedEvent;
 import dev.sirius.cloud.api.event.events.WrapperConnectedEvent;
 import dev.sirius.cloud.api.event.events.WrapperDisconnectedEvent;
 import dev.sirius.cloud.api.logging.CloudLogger;
@@ -387,6 +388,9 @@ public final class NodePacketHandler implements PacketHandler {
             } else {
                 crash.lastLines().forEach(line -> LOGGER.error("  | {}", line));
             }
+            String group = services.byId(crash.serviceId()).map(ServiceInfo::groupName).orElse("");
+            events.post(new ServiceCrashedEvent(crash.serviceName(), group, crash.exitCode(),
+                    List.copyOf(crash.lastLines())));
 
         } else if (packet instanceof ServiceListRequestPacket request) {
             List<ServiceInfo> result = request.groupFilter() == null

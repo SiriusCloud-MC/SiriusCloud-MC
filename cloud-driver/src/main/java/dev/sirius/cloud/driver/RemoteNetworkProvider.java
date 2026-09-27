@@ -74,6 +74,11 @@ final class RemoteNetworkProvider implements NetworkProvider {
         return request(new ChatRestrictionRequestPacket(player, true, 0, ""));
     }
 
+    @Override
+    public boolean isChatRestricted(UUID player) {
+        throw new UnsupportedOperationException(NODE_ONLY);
+    }
+
     private CompletableFuture<Void> request(ChatRestrictionRequestPacket packet) {
         Optional<NetworkChannel> channel = client.channel();
         if (channel.isEmpty()) {

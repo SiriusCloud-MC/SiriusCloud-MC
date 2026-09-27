@@ -46,4 +46,13 @@ public interface NetworkProvider {
     CompletableFuture<Void> restrictChat(UUID player, long untilMillis, String reason);
 
     CompletableFuture<Void> liftChatRestriction(UUID player);
+
+    /**
+     * Whether a player may not chat right now.
+     *
+     * <p>Node-side only, like commands. For a module relaying chat of its own -
+     * private messages, party chat - which must refuse a muted player exactly
+     * as the servers do, or a mute would only cover public chat.
+     */
+    boolean isChatRestricted(UUID player);
 }

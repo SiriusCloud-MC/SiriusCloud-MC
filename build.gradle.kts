@@ -57,9 +57,14 @@ val dist by tasks.registering(Copy::class) {
     val notifyModule = project(":cloud-modules:notify").tasks.named("jar")
     val permissionsModule = project(":cloud-modules:permissions").tasks.named("jar")
     val permissionsPlugin = project(":cloud-plugins:permissions").tasks.named("jar")
+    // The network feature modules. Each carries its own copy of the shared
+    // helpers in cloud-modules/common, which is therefore not shipped itself.
+    val featureModules = listOf("display", "social", "moderation", "matchmaking", "metrics", "discord")
+            .associateWith { project(":cloud-modules:$it").tasks.named("jar") }
 
     dependsOn(nodeJar, wrapperJar, paperPlugin, velocityPlugin, restModule, notifyModule,
             permissionsModule, permissionsPlugin)
+    dependsOn(featureModules.values)
 
     into(layout.buildDirectory.dir("dist"))
 
@@ -94,6 +99,15 @@ val dist by tasks.registering(Copy::class) {
     from(permissionsModule) {
         into("node/modules")
         rename { "cloud-module-permissions.jar" }
+    }
+    // Every feature can be switched off in its module's config.json, or the
+    // whole module by deleting its jar - worth doing where a network already
+    // runs its own plugin for bans or private messages.
+    featureModules.forEach { (name, jar) ->
+        from(jar) {
+            into("node/modules")
+            rename { "cloud-module-$name.jar" }
+        }
     }
     // Not injected into services automatically, unlike the core plugin:
     // permissions are opt-in, and a server already running LuckPerms must not

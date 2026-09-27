@@ -11,6 +11,13 @@ include("cloud-plugins:permissions")
 include("cloud-modules:rest")
 include("cloud-modules:notify")
 include("cloud-modules:permissions")
+include("cloud-modules:common")
+include("cloud-modules:display")
+include("cloud-modules:social")
+include("cloud-modules:moderation")
+include("cloud-modules:matchmaking")
+include("cloud-modules:metrics")
+include("cloud-modules:discord")
 
 dependencyResolutionManagement {
     repositories {
