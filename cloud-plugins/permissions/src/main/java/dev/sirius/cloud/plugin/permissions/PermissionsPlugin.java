@@ -8,7 +8,6 @@ import dev.sirius.cloud.api.messaging.ChannelMessage;
 import dev.sirius.cloud.api.permission.PermissionChannels;
 import dev.sirius.cloud.api.permission.PermissionResolver;
 import dev.sirius.cloud.api.permission.PermissionSnapshot;
-import net.kyori.adventure.text.Component;
 import net.kyori.adventure.text.serializer.legacy.LegacyComponentSerializer;
 import org.bukkit.Bukkit;
 import org.bukkit.event.EventHandler;
@@ -40,6 +39,7 @@ public final class PermissionsPlugin extends JavaPlugin implements Listener {
             LegacyComponentSerializer.legacyAmpersand();
 
     private PermissionApplier applier;
+    private RankDisplay display;
 
     /** The latest snapshot. Null until the node answers our first request. */
     private volatile PermissionSnapshot snapshot;
@@ -56,6 +56,9 @@ public final class PermissionsPlugin extends JavaPlugin implements Listener {
         }
 
         applier = new PermissionApplier(this);
+        display = new RankDisplay(() -> snapshot);
+        // Left behind by a crash: the main scoreboard is saved with the world.
+        display.removeAllTeams();
 
         CloudDriver.instance().messaging()
                 .subscribe(PermissionChannels.SNAPSHOT, this::onSnapshot);
@@ -63,6 +66,7 @@ public final class PermissionsPlugin extends JavaPlugin implements Listener {
                 .subscribe(PermissionChannels.RESULT, this::onResult);
 
         getServer().getPluginManager().registerEvents(this, this);
+        getServer().getPluginManager().registerEvents(display, this);
 
         PermsCommand command = new PermsCommand(this);
         var registered = getCommand("perms");
@@ -79,6 +83,9 @@ public final class PermissionsPlugin extends JavaPlugin implements Listener {
     public void onDisable() {
         if (applier != null) {
             applier.clear();
+        }
+        if (display != null) {
+            display.removeAllTeams();
         }
         if (CloudDriver.isAvailable()) {
             CloudDriver.instance().messaging().unsubscribe(PermissionChannels.SNAPSHOT);
@@ -142,10 +149,13 @@ public final class PermissionsPlugin extends JavaPlugin implements Listener {
         // Names as well as permissions: a rank change has to show in the tab
         // list straight away, not the next time the player happens to rejoin.
         // Both touch Bukkit state, and snapshots arrive on a Netty thread.
-        Bukkit.getScheduler().runTask(this, () -> Bukkit.getOnlinePlayers().forEach(player -> {
-            applier.apply(player, incoming);
-            applyDisplayName(player, incoming);
-        }));
+        Bukkit.getScheduler().runTask(this, () -> {
+            Bukkit.getOnlinePlayers().forEach(player -> {
+                applier.apply(player, incoming);
+                display.apply(player, incoming);
+            });
+            display.pruneEmptyTeams();
+        });
 
         if (first) {
             getLogger().info("Applied cloud permissions: "
@@ -198,37 +208,13 @@ public final class PermissionsPlugin extends JavaPlugin implements Listener {
             return;
         }
         applier.apply(event.getPlayer(), current);
-        applyDisplayName(event.getPlayer(), current);
+        display.apply(event.getPlayer(), current);
     }
 
     @EventHandler
     public void onQuit(PlayerQuitEvent event) {
         applier.forget(event.getPlayer().getUniqueId());
-    }
-
-    /**
-     * Puts the player's prefix and suffix in the tab list and display name, or
-     * takes them away again when the player no longer has one.
-     *
-     * <p>Chat itself is left alone. Every chat plugin formats chat, and a
-     * permissions plugin quietly rewriting the format is how two plugins end up
-     * fighting over one line. The prefix is published for others to use.
-     */
-    private void applyDisplayName(org.bukkit.entity.Player player, PermissionSnapshot current) {
-        String prefix = PermissionResolver.prefixOf(current, player.getUniqueId());
-        String suffix = PermissionResolver.suffixOf(current, player.getUniqueId());
-        if (prefix.isEmpty() && suffix.isEmpty()) {
-            // Null restores the plain name; returning early would leave a
-            // player who just lost their rank still wearing its prefix.
-            player.playerListName(null);
-            player.displayName(null);
-            return;
-        }
-        Component name = LEGACY.deserialize(prefix)
-                .append(Component.text(player.getName()))
-                .append(LEGACY.deserialize(suffix));
-        player.playerListName(name);
-        player.displayName(name);
+        display.forget(event.getPlayer());
     }
 
     static LegacyComponentSerializer legacy() {

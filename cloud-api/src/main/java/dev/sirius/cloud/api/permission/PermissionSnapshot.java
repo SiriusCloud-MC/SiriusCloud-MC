@@ -23,6 +23,7 @@ public final class PermissionSnapshot {
     private long revision;
     private List<PermissionGroup> groups = new ArrayList<>();
     private List<PermissionUser> users = new ArrayList<>();
+    private PermissionDisplay display = new PermissionDisplay();
 
     /** Required by the JSON codec. */
     @SuppressWarnings("unused")
@@ -30,9 +31,20 @@ public final class PermissionSnapshot {
     }
 
     public PermissionSnapshot(long revision, List<PermissionGroup> groups, List<PermissionUser> users) {
+        this(revision, groups, users, new PermissionDisplay());
+    }
+
+    public PermissionSnapshot(long revision, List<PermissionGroup> groups, List<PermissionUser> users,
+                              PermissionDisplay display) {
         this.revision = revision;
         this.groups = groups;
         this.users = users;
+        this.display = display;
+    }
+
+    /** The same data with different display settings. */
+    public PermissionSnapshot withDisplay(PermissionDisplay display) {
+        return new PermissionSnapshot(revision, groups, users, display);
     }
 
     public long revision() {
@@ -45,6 +57,11 @@ public final class PermissionSnapshot {
 
     public List<PermissionUser> users() {
         return users == null ? List.of() : users;
+    }
+
+    /** Defaults when absent, which is what a node from before display settings sends. */
+    public PermissionDisplay display() {
+        return display == null ? new PermissionDisplay() : display;
     }
 
     public Optional<PermissionGroup> group(String name) {

@@ -102,7 +102,8 @@ final class PermissionStore {
 
         PermissionGroup admin = new PermissionGroup("admin");
         admin.priority(100);
-        admin.prefix("&c[Admin] ");
+        // "Admin | Name", with the trailing code giving the name the rank's colour.
+        admin.prefix("&cAdmin &8| &c");
         admin.inherits().add("default");
         admin.permissions().add("*");
         groups.put(key(admin.name()), admin);

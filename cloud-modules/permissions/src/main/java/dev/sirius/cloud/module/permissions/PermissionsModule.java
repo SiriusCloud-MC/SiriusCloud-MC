@@ -1,6 +1,7 @@
 package dev.sirius.cloud.module.permissions;
 
 import com.google.gson.Gson;
+import com.google.gson.GsonBuilder;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonParser;
 import dev.sirius.cloud.api.driver.CloudDriver;
@@ -9,10 +10,16 @@ import dev.sirius.cloud.api.messaging.ChannelMessage;
 import dev.sirius.cloud.api.module.CloudModule;
 import dev.sirius.cloud.api.module.ModuleContext;
 import dev.sirius.cloud.api.permission.PermissionChannels;
+import dev.sirius.cloud.api.permission.PermissionDisplay;
 import dev.sirius.cloud.api.permission.PermissionGroup;
 import dev.sirius.cloud.api.permission.PermissionUser;
 
 import java.io.IOException;
+import java.io.Reader;
+import java.io.Writer;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
@@ -34,9 +41,11 @@ public final class PermissionsModule implements CloudModule {
     private static final CloudLogger LOGGER = CloudLogger.of("Permissions");
 
     private static final Gson GSON = new Gson();
+    private static final Gson PRETTY = new GsonBuilder().setPrettyPrinting().disableHtmlEscaping().create();
 
     private CloudDriver driver;
     private PermissionStore store;
+    private PermissionDisplay display;
     private PermissionMutations mutations;
 
     @Override
@@ -45,6 +54,7 @@ public final class PermissionsModule implements CloudModule {
         this.store = new PermissionStore(context.dataDirectory());
 
         try {
+            this.display = loadDisplay(context.dataDirectory().resolve("config.json"));
             store.load();
         } catch (IOException exception) {
             throw new IllegalStateException("Could not read the permission files: "
@@ -117,11 +127,32 @@ public final class PermissionsModule implements CloudModule {
 
     private void publishSnapshot() {
         driver.messaging()
-                .publish(PermissionChannels.SNAPSHOT, GSON.toJson(store.snapshot()))
+                .publish(PermissionChannels.SNAPSHOT, GSON.toJson(store.snapshot().withDisplay(display)))
                 .exceptionally(error -> {
                     LOGGER.debug("Could not publish the permission snapshot: {}", error.getMessage());
                     return null;
                 });
+    }
+
+    /**
+     * Chat format, nametags and tab list settings, written out with their
+     * defaults on first start so there is a file to edit.
+     */
+    private static PermissionDisplay loadDisplay(Path file) throws IOException {
+        if (Files.exists(file)) {
+            try (Reader reader = Files.newBufferedReader(file, StandardCharsets.UTF_8)) {
+                PermissionDisplay loaded = PRETTY.fromJson(reader, PermissionDisplay.class);
+                if (loaded != null) {
+                    return loaded;
+                }
+            }
+        }
+        PermissionDisplay defaults = new PermissionDisplay();
+        Files.createDirectories(file.getParent());
+        try (Writer writer = Files.newBufferedWriter(file, StandardCharsets.UTF_8)) {
+            PRETTY.toJson(defaults, writer);
+        }
+        return defaults;
     }
 
     /**

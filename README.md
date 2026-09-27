@@ -964,11 +964,38 @@ does not expand wildcards itself, so the plugin expands them against the
 permissions plugins have actually registered. A plugin that never declares its
 nodes cannot be covered by a wildcard, which is a limit of the platform.
 
+### Ranks in chat, nametags and the tab list
+
 Prefixes and suffixes take the single highest-priority group, because a player
-cannot wear two at once. They are applied to the tab list and display name;
-**chat is deliberately left alone**, since every chat plugin formats chat and a
-permissions plugin quietly rewriting the format is how two plugins end up
-fighting over one line.
+cannot wear two at once. They show in chat, above players' heads and in the tab
+list, which is also sorted with the highest priority on top.
+
+```
+/perms group admin set prefix &cAdmin &8| &c
+```
+
+```
+Admin | JavaRenamed: Hello, world.
+```
+
+`&` colour codes carry on until the next one, so the trailing `&c` is what
+makes the name red. How it is shown is set once for the whole network, in
+`node/modules/permissions/config.json`:
+
+```json
+{
+  "chat": true,
+  "chatFormat": "{prefix}{name}{suffix}&7: &f{message}",
+  "nametags": true,
+  "tablist": true
+}
+```
+
+Set `chat` to `false` if a chat plugin should format chat instead. What players
+type is never read for colour codes, so nobody can colour their messages by
+typing `&c`. Nametags are scoreboard teams on the main scoreboard; a plugin that
+gives players a scoreboard of its own, such as a sidebar plugin, replaces them
+unless it copies the main scoreboard's teams.
 
 Data lives in `node/modules/permissions/groups.json` and `users.json`, small
 enough to read, diff and keep in version control.
