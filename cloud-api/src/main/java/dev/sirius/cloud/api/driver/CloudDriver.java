@@ -1,7 +1,9 @@
 package dev.sirius.cloud.api.driver;
 
 import dev.sirius.cloud.api.event.EventManager;
+import dev.sirius.cloud.api.database.Database;
 import dev.sirius.cloud.api.messaging.MessagingProvider;
+import dev.sirius.cloud.api.store.KeyValueStore;
 
 /**
  * The single entry point into the cloud.
@@ -24,6 +26,12 @@ public interface CloudDriver {
 
     /** Publish/subscribe between everything in the cloud, brokered by the node. */
     MessagingProvider messaging();
+
+    /** Small shared state on the node, with expiry. */
+    KeyValueStore store();
+
+    /** Persistent documents in whatever database the node is configured with. */
+    Database database();
 
     EventManager events();
 

@@ -2,6 +2,9 @@ package dev.sirius.cloud.driver;
 
 import dev.sirius.cloud.api.driver.PlayerProvider;
 import dev.sirius.cloud.api.player.CloudPlayer;
+import dev.sirius.cloud.api.player.PlayerProfile;
+import dev.sirius.cloud.protocol.packet.impl.PlayerProfileRequestPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerProfileResponsePacket;
 import dev.sirius.cloud.protocol.connection.NetworkChannel;
 import dev.sirius.cloud.protocol.connection.NetworkClient;
 import dev.sirius.cloud.protocol.packet.Packet;
@@ -135,5 +138,24 @@ final class RemotePlayerProvider implements PlayerProvider {
             return CompletableFuture.failedFuture(new IllegalStateException("Not connected to the node"));
         }
         return channel.get().query(packet);
+    }
+
+    @Override
+    public CompletableFuture<Optional<PlayerProfile>> profile(UUID uniqueId) {
+        return profileQuery(new PlayerProfileRequestPacket(uniqueId, null));
+    }
+
+    @Override
+    public CompletableFuture<Optional<PlayerProfile>> profile(String name) {
+        return profileQuery(new PlayerProfileRequestPacket(null, name));
+    }
+
+    private CompletableFuture<Optional<PlayerProfile>> profileQuery(PlayerProfileRequestPacket request) {
+        Optional<NetworkChannel> channel = client.channel();
+        if (channel.isEmpty()) {
+            return CompletableFuture.failedFuture(new IllegalStateException("Not connected to the node"));
+        }
+        return channel.get().query(request)
+                .thenApply(packet -> Optional.ofNullable(((PlayerProfileResponsePacket) packet).profile()));
     }
 }

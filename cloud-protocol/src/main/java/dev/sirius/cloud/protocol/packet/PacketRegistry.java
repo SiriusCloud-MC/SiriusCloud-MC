@@ -2,6 +2,10 @@ package dev.sirius.cloud.protocol.packet;
 
 import dev.sirius.cloud.protocol.packet.impl.AcknowledgePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChannelMessagePacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerProfileResponsePacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerProfileRequestPacket;
+import dev.sirius.cloud.protocol.packet.impl.DataResponsePacket;
+import dev.sirius.cloud.protocol.packet.impl.DataRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceUpdatePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServicePropertiesPacket;
 import dev.sirius.cloud.protocol.packet.impl.ChannelSubscriptionsPacket;
@@ -137,9 +141,15 @@ public final class PacketRegistry {
                 .register(0x46, PlayerKickPacket.class, PlayerKickPacket::new)
                 .register(0x47, PlayerListRequestPacket.class, PlayerListRequestPacket::new)
                 .register(0x48, PlayerListResponsePacket.class, PlayerListResponsePacket::new)
+                .register(0x49, PlayerProfileRequestPacket.class, PlayerProfileRequestPacket::new)
+                .register(0x4A, PlayerProfileResponsePacket.class, PlayerProfileResponsePacket::new)
 
                 // 0x50-0x5F - cloud-wide messaging
                 .register(0x50, ChannelMessagePacket.class, ChannelMessagePacket::new)
-                .register(0x51, ChannelSubscriptionsPacket.class, ChannelSubscriptionsPacket::new);
+                .register(0x51, ChannelSubscriptionsPacket.class, ChannelSubscriptionsPacket::new)
+
+                // 0x60-0x6F - shared state
+                .register(0x60, DataRequestPacket.class, DataRequestPacket::new)
+                .register(0x61, DataResponsePacket.class, DataResponsePacket::new);
     }
 }

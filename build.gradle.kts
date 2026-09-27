@@ -22,6 +22,14 @@ subprojects {
         options.release.set(21)
     }
 
+    // Catalog accessors are not generated inside subprojects {}, so the
+    // coordinates are looked up by name from the root's catalog.
+    val catalog = rootProject.extensions.getByType<VersionCatalogsExtension>().named("libs")
+    dependencies {
+        "testImplementation"(catalog.findLibrary("junit").get())
+        "testRuntimeOnly"(catalog.findLibrary("junit-launcher").get())
+    }
+
     tasks.withType<Test>().configureEach {
         useJUnitPlatform()
         systemProperty("file.encoding", "UTF-8")

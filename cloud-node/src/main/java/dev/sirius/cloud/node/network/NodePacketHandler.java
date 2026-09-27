@@ -34,6 +34,10 @@ import dev.sirius.cloud.protocol.packet.Packet;
 import dev.sirius.cloud.protocol.packet.impl.AcknowledgePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChannelMessagePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChannelSubscriptionsPacket;
+import dev.sirius.cloud.protocol.packet.impl.DataRequestPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerProfileRequestPacket;
+import dev.sirius.cloud.protocol.packet.impl.PlayerProfileResponsePacket;
+import dev.sirius.cloud.node.store.DataRequests;
 import dev.sirius.cloud.protocol.packet.impl.ServicePropertiesPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleCommandPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleHistoryPacket;
@@ -136,7 +140,10 @@ public final class NodePacketHandler implements PacketHandler {
             LOGGER.warn("Refusing {} from read-only API client {}",
                     packet.getClass().getSimpleName(), channel.name());
             if (packet.queryId() != null) {
-                channel.respond(packet, AcknowledgePacket.fail("This API client is read-only"));
+                channel.respond(packet, packet instanceof DataRequestPacket
+                        ? dev.sirius.cloud.protocol.packet.impl.DataResponsePacket.failure(
+                                "This API client is read-only")
+                        : AcknowledgePacket.fail("This API client is read-only"));
             }
             return;
         }
@@ -259,6 +266,17 @@ public final class NodePacketHandler implements PacketHandler {
             message.sourceService(source);
             routeChannelMessage(message, channel, source);
 
+        } else if (packet instanceof DataRequestPacket request) {
+            DataRequests.handle(driver.store(), driver.database(), request)
+                    .thenAccept(response -> channel.respond(request, response));
+
+        } else if (packet instanceof PlayerProfileRequestPacket request) {
+            (request.uniqueId() != null
+                    ? driver.players().profile(request.uniqueId())
+                    : driver.players().profile(request.name() == null ? "" : request.name()))
+                    .whenComplete((profile, error) -> channel.respond(request,
+                            new PlayerProfileResponsePacket(error == null ? profile.orElse(null) : null)));
+
         } else if (packet instanceof ChannelSubscriptionsPacket subscribe) {
             if (channel.serviceId() != null) {
                 serviceChannels.subscriptions(channel.serviceId(), subscribe.channels());
@@ -366,6 +384,7 @@ public final class NodePacketHandler implements PacketHandler {
     /** Whether a packet changes cloud state, as opposed to reading it. */
     private static boolean mutates(Packet packet) {
         return packet instanceof ServicePropertiesPacket
+                || (packet instanceof DataRequestPacket data && data.operation().mutates())
                 || packet instanceof ServiceStartRequestPacket
                 || packet instanceof ServiceStopPacket
                 || packet instanceof ConsoleCommandPacket

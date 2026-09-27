@@ -1,6 +1,7 @@
 package dev.sirius.cloud.api.driver;
 
 import dev.sirius.cloud.api.player.CloudPlayer;
+import dev.sirius.cloud.api.player.PlayerProfile;
 
 import java.util.Collection;
 import java.util.Optional;
@@ -44,4 +45,16 @@ public interface PlayerProvider {
     CompletableFuture<Void> broadcast(String message);
 
     CompletableFuture<Void> kick(UUID uniqueId, String reason);
+
+    /** What the cloud remembers about a player, online or not. */
+    CompletableFuture<Optional<PlayerProfile>> profile(UUID uniqueId);
+
+    /**
+     * A profile by the name a player last joined with.
+     *
+     * <p>The way to find somebody who is offline. Names are matched without
+     * regard to case, and a name that has since been taken by someone else
+     * resolves to its current owner.
+     */
+    CompletableFuture<Optional<PlayerProfile>> profile(String name);
 }

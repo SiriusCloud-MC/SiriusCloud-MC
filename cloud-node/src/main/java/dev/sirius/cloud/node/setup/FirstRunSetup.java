@@ -146,6 +146,8 @@ public final class FirstRunSetup {
         config.minimumPaperVersion(console.ask(
                 "Oldest Paper version to list in 'versions'", config.minimumPaperVersion()));
 
+        configureDatabase();
+
         JsonConfig.save(configFile, config);
 
         console.print("");
@@ -155,6 +157,44 @@ public final class FirstRunSetup {
         if (!firstRun) {
             LOGGER.warn("Address and port changes take effect when the node restarts.");
         }
+    }
+
+    /**
+     * Where persistent data lives.
+     *
+     * <p>Asked rather than defaulted silently, because it is the one setting
+     * that is painful to change after the fact: bans, friends and profiles
+     * written to JSON files do not move themselves into MySQL.
+     */
+    private void configureDatabase() {
+        var database = config.database();
+
+        console.print("");
+        console.print("  Bans, friends and player history are kept in a database.");
+        console.print("  'json' needs nothing installed; use a real database for more than one node.");
+
+        String type;
+        while (true) {
+            type = console.ask("Database (json, mysql, mariadb, postgresql, mongodb)", database.type())
+                    .toLowerCase(java.util.Locale.ROOT);
+            if (java.util.Set.of("json", "mysql", "mariadb", "postgresql", "postgres", "mongodb", "mongo")
+                    .contains(type)) {
+                break;
+            }
+            console.print("  '" + type + "' is not one of those.");
+        }
+        database.type(type);
+        if (type.equals("json")) {
+            return;
+        }
+
+        database.port(0);
+        database.host(console.ask("Database host", database.host()));
+        database.port(console.askInt("Database port", database.port(), 1, 65535));
+        database.database(console.ask("Database name", database.database()));
+        database.username(console.ask("Username", database.username()));
+        database.password(console.ask("Password", database.password()));
+        console.print("  The node checks the connection when it starts and refuses to run without it.");
     }
 
     // ----------------------------------------------------------------- group

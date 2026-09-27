@@ -35,6 +35,9 @@ import dev.sirius.cloud.node.command.commands.VersionsCommand;
 import dev.sirius.cloud.driver.config.DirectoryLock;
 import dev.sirius.cloud.driver.config.JsonConfig;
 import dev.sirius.cloud.node.config.NodeConfig;
+import dev.sirius.cloud.node.database.NodeDatabase;
+import dev.sirius.cloud.node.player.PlayerProfiles;
+import dev.sirius.cloud.node.store.NodeKeyValueStore;
 import dev.sirius.cloud.node.console.NodeConsole;
 import dev.sirius.cloud.node.group.GroupRegistry;
 import dev.sirius.cloud.node.module.ModuleManager;
@@ -99,6 +102,9 @@ public final class CloudNode {
 
     private NodeConsole console;
     private DirectoryLock directoryLock;
+    private NodeDatabase database;
+    private NodeKeyValueStore store;
+    private PlayerProfiles profiles;
     private ModuleManager modules;
 
     public CloudNode(Path workingDirectory) throws IOException {
@@ -151,10 +157,21 @@ public final class CloudNode {
             JsonConfig.save(configFile, config);
         }
 
+        // After setup, which is where the database is chosen, and before the
+        // driver, which hands it out. Opening fails loudly: running on without
+        // the database this cloud was configured for would quietly drop every
+        // ban and profile written until somebody noticed.
+        database = NodeDatabase.open(config.database(), workingDirectory.resolve("local").resolve("database"));
+        store = new NodeKeyValueStore(workingDirectory.resolve("local").resolve("store.json"));
+        store.load();
+        profiles = new PlayerProfiles(database);
+        profiles.attach(events);
+
         // Held as well as bound: the packet handler answers node queries through
         // it, so the API and the console describe the node from one place.
         LocalCloudDriver driver = new LocalCloudDriver(
-                serviceManager, services, groups, events, players, playerManager, wrappers, config, serviceChannels);
+                serviceManager, services, groups, events, players, playerManager, wrappers, config, serviceChannels,
+                store, database, profiles);
         CloudDriver.bind(driver);
 
         // An attached console must not outlive the service it is attached to.
@@ -223,6 +240,11 @@ public final class CloudNode {
                 new ProvisioningTask(groups, services, serviceManager, wrappers, backoff),
                 2, 1, TimeUnit.SECONDS);
 
+        // Written behind rather than on every change: the store holds state
+        // that tolerates losing a few seconds, and a write per increment would
+        // turn a busy counter into a busy disk.
+        scheduler.scheduleWithFixedDelay(store::flush, 5, 5, TimeUnit.SECONDS);
+
         Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "sirius-shutdown"));
 
         // Blocks this thread until the console exits.
@@ -282,6 +304,18 @@ public final class CloudNode {
             if (services.size() > 0) {
                 LOGGER.warn("{} service(s) did not stop in time", services.size());
             }
+        }
+
+        // After the services have stopped, so every player's disconnect has
+        // been counted; then whatever sessions remain are closed out here.
+        if (profiles != null) {
+            profiles.flushAll();
+        }
+        if (store != null) {
+            store.flush();
+        }
+        if (database != null) {
+            database.close();
         }
 
         server.close();

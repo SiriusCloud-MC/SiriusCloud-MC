@@ -1,6 +1,10 @@
 package dev.sirius.cloud.node;
 
+import dev.sirius.cloud.api.database.Database;
 import dev.sirius.cloud.api.driver.CloudDriver;
+import dev.sirius.cloud.api.player.PlayerProfile;
+import dev.sirius.cloud.api.store.KeyValueStore;
+import dev.sirius.cloud.node.player.PlayerProfiles;
 import dev.sirius.cloud.api.driver.GroupProvider;
 import dev.sirius.cloud.api.driver.NodeProvider;
 import dev.sirius.cloud.api.messaging.ChannelMessage;
@@ -50,6 +54,9 @@ public final class LocalCloudDriver implements CloudDriver {
     private final NodeConfig config;
     private final long startedAt = System.currentTimeMillis();
     private final LocalMessagingProvider messaging;
+    private final KeyValueStore store;
+    private final Database database;
+    private final PlayerProfiles profiles;
 
     public LocalCloudDriver(ServiceManager serviceManager,
                             ServiceRegistry serviceRegistry,
@@ -59,7 +66,10 @@ public final class LocalCloudDriver implements CloudDriver {
                             PlayerManager playerManager,
                             WrapperRegistry wrapperRegistry,
                             NodeConfig config,
-                            ServiceChannelRegistry serviceChannels) {
+                            ServiceChannelRegistry serviceChannels,
+                            KeyValueStore store,
+                            Database database,
+                            PlayerProfiles profiles) {
         this.serviceManager = serviceManager;
         this.serviceRegistry = serviceRegistry;
         this.groupRegistry = groupRegistry;
@@ -69,6 +79,9 @@ public final class LocalCloudDriver implements CloudDriver {
         this.wrapperRegistry = wrapperRegistry;
         this.config = config;
         this.messaging = new LocalMessagingProvider(serviceChannels, serviceRegistry);
+        this.store = store;
+        this.database = database;
+        this.profiles = profiles;
     }
 
     /** The node's own description, rebuilt per call so the counters are current. */
@@ -195,6 +208,16 @@ public final class LocalCloudDriver implements CloudDriver {
             public CompletableFuture<Void> kick(UUID uniqueId, String reason) {
                 return playerManager.kick(uniqueId, reason);
             }
+
+            @Override
+            public CompletableFuture<Optional<PlayerProfile>> profile(UUID uniqueId) {
+                return profiles.profile(uniqueId);
+            }
+
+            @Override
+            public CompletableFuture<Optional<PlayerProfile>> profile(String name) {
+                return profiles.profile(name);
+            }
         };
     }
 
@@ -248,6 +271,16 @@ public final class LocalCloudDriver implements CloudDriver {
     /** Routes an inbound channel message from a service to node-side subscribers. */
     public void deliverChannelMessage(ChannelMessage message) {
         messaging.deliver(message);
+    }
+
+    @Override
+    public KeyValueStore store() {
+        return store;
+    }
+
+    @Override
+    public Database database() {
+        return database;
     }
 
     @Override

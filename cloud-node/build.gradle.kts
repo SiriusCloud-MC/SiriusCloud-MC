@@ -9,6 +9,12 @@ dependencies {
     implementation(project(":cloud-protocol"))
     implementation(project(":cloud-driver"))
     implementation(libs.bundles.jline)
+
+    // Every backend ships in the node jar, so switching from JSON files to a
+    // real database is a config change and never a hunt for the right driver.
+    // slf4j-nop because Hikari and the Mongo driver log through SLF4J and would
+    // otherwise print a warning about a missing binding on every start.
+    implementation(libs.bundles.database)
 }
 
 application {

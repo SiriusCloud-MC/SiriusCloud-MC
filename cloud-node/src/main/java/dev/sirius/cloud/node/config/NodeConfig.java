@@ -76,6 +76,16 @@ public final class NodeConfig {
 
     private boolean debug = false;
 
+    /** Persistent storage; see {@link DatabaseSettings}. */
+    private DatabaseSettings database = new DatabaseSettings();
+
+    public DatabaseSettings database() {
+        if (database == null) {
+            database = new DatabaseSettings();
+        }
+        return database;
+    }
+
     public boolean setupCompleted() {
         return setupCompleted;
     }
