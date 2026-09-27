@@ -1,5 +1,6 @@
 package dev.sirius.cloud.api.group;
 
+import dev.sirius.cloud.api.service.ServerSoftware;
 import dev.sirius.cloud.api.service.ServiceType;
 
 import java.util.ArrayList;
@@ -63,8 +64,22 @@ public final class ServiceGroup {
      */
     private String version = "latest";
 
-    /** Paper build number, or {@code latest}. */
+    /**
+     * Build number, or {@code latest}. For Fabric this is the loader version.
+     */
     private String build = "latest";
+
+    /**
+     * CPU cores a service may use when wrappers run services in containers;
+     * 0 for no limit. Ignored outside containers, where the JVM cannot be capped.
+     */
+    private double cpuLimit = 0;
+
+    /**
+     * What the group runs. Unset in files written before this existed, which
+     * means Paper for servers and Velocity for proxies - what they always ran.
+     */
+    private ServerSoftware software;
 
     /**
      * JVM to run this group's services with. Empty uses the wrapper's default.
@@ -270,6 +285,27 @@ public final class ServiceGroup {
 
     public void javaExecutable(String javaExecutable) {
         this.javaExecutable = javaExecutable;
+    }
+
+    public double cpuLimit() {
+        return Math.max(0, cpuLimit);
+    }
+
+    public void cpuLimit(double cpuLimit) {
+        this.cpuLimit = cpuLimit;
+    }
+
+    public ServerSoftware software() {
+        return software == null || software.type() != type ? ServerSoftware.defaultFor(type) : software;
+    }
+
+    /** @throws IllegalArgumentException if the software is for the other kind of service */
+    public void software(ServerSoftware software) {
+        if (software != null && software.type() != type) {
+            throw new IllegalArgumentException(software.id() + " runs " + software.type().name().toLowerCase()
+                    + " services, and " + name + " is a " + type.name().toLowerCase() + " group");
+        }
+        this.software = software;
     }
 
     public int startTimeoutSeconds() {

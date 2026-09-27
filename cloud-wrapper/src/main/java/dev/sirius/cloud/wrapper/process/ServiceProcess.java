@@ -1,6 +1,7 @@
 package dev.sirius.cloud.wrapper.process;
 
 import com.google.gson.GsonBuilder;
+import dev.sirius.cloud.api.service.ServerSoftware;
 import dev.sirius.cloud.api.service.ServiceType;
 import dev.sirius.cloud.api.group.ServiceGroup;
 import dev.sirius.cloud.api.logging.CloudLogger;
@@ -25,8 +26,10 @@ import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Properties;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Predicate;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
@@ -46,8 +49,6 @@ public final class ServiceProcess {
     /** How long a service gets to save and exit before we escalate. */
     private static final int GRACEFUL_STOP_SECONDS = 40;
 
-    /** How long {@code destroy()} gets before {@code destroyForcibly()}. */
-    private static final int TERMINATE_SECONDS = 10;
 
     /**
      * Console backlog kept per service so attaching shows recent context
@@ -66,6 +67,24 @@ public final class ServiceProcess {
 
     /** Resolved before construction; see JavaRuntimeResolver for why it is not the wrapper's own. */
     private final String javaExecutable;
+
+    /** Directly or in a container; see {@link ServiceLauncher}. */
+    private final ServiceLauncher launcher;
+
+    /**
+     * Called once when the log shows the server finished starting.
+     *
+     * <p>Only for software that cannot run the cloud's plugin - Fabric - whose
+     * readiness has no better signal. Everything else reports it properly.
+     */
+    private volatile Runnable logReadySink;
+    private final AtomicBoolean logReadyReported = new AtomicBoolean();
+
+    /** Callers waiting for a particular console line; see {@link #awaitConsole}. */
+    private final List<ConsoleWaiter> waiters = new CopyOnWriteArrayList<>();
+
+    private record ConsoleWaiter(Predicate<String> match, CompletableFuture<String> result) {
+    }
 
     private final Consumer<String> consoleSink;
     private final BiConsumer<ServiceState, Integer> stateSink;
@@ -96,6 +115,7 @@ public final class ServiceProcess {
                           WrapperConfig config,
                           Path directory,
                           String javaExecutable,
+                          ServiceLauncher launcher,
                           Consumer<String> consoleSink,
                           BiConsumer<ServiceState, Integer> stateSink,
                           BiConsumer<Integer, List<String>> crashSink) {
@@ -104,6 +124,7 @@ public final class ServiceProcess {
         this.config = config;
         this.directory = directory;
         this.javaExecutable = javaExecutable;
+        this.launcher = launcher;
         this.consoleSink = consoleSink;
         this.stateSink = stateSink;
         this.crashSink = crashSink;
@@ -115,6 +136,29 @@ public final class ServiceProcess {
 
     public Path directory() {
         return directory;
+    }
+
+    public void onLogReady(Runnable sink) {
+        this.logReadySink = sink;
+    }
+
+    public ServiceGroup group() {
+        return group;
+    }
+
+    /**
+     * Completes with the first console line matching, or fails after a timeout.
+     *
+     * <p>How a backup knows the world has really been flushed: it asks for a
+     * save and waits for the server to say it saved, rather than guessing how
+     * long saving takes.
+     */
+    public CompletableFuture<String> awaitConsole(Predicate<String> match, long timeoutMillis) {
+        CompletableFuture<String> result = new CompletableFuture<>();
+        ConsoleWaiter waiter = new ConsoleWaiter(match, result);
+        waiters.add(waiter);
+        return result.orTimeout(timeoutMillis, TimeUnit.MILLISECONDS)
+                .whenComplete((line, error) -> waiters.remove(waiter));
     }
 
     public String token() {
@@ -129,6 +173,7 @@ public final class ServiceProcess {
     /** Lays out the working directory and spawns the JVM. */
     public void start(Path serverJar,
                       Path pluginJar,
+                      List<Path> mods,
                       TemplateManager templates,
                       String token,
                       String nodeHost,
@@ -141,20 +186,38 @@ public final class ServiceProcess {
 
         Files.copy(serverJar, directory.resolve("server.jar"), StandardCopyOption.REPLACE_EXISTING);
 
-        if (pluginJar != null && Files.isRegularFile(pluginJar)) {
-            Path plugins = directory.resolve(group.type().pluginDirectory());
-            Files.createDirectories(plugins);
-            Files.copy(pluginJar, plugins.resolve("cloud-plugin.jar"), StandardCopyOption.REPLACE_EXISTING);
-        } else {
-            LOGGER.warn("No cloud plugin jar available; {} will never report READY", info.name());
+        ServerSoftware software = group.software();
+        if (software.runsCloudPlugin()) {
+            if (pluginJar != null && Files.isRegularFile(pluginJar)) {
+                Path plugins = directory.resolve(group.type().pluginDirectory());
+                Files.createDirectories(plugins);
+                Files.copy(pluginJar, plugins.resolve("cloud-plugin.jar"), StandardCopyOption.REPLACE_EXISTING);
+            } else {
+                LOGGER.warn("No cloud plugin jar available; {} will never report READY", info.name());
+            }
         }
+        if (!mods.isEmpty()) {
+            Path modsDirectory = directory.resolve("mods");
+            Files.createDirectories(modsDirectory);
+            for (Path mod : mods) {
+                Files.copy(mod, modsDirectory.resolve(mod.getFileName().toString()), StandardCopyOption.REPLACE_EXISTING);
+            }
+        }
+
+        // In a container the server binds the container's own interface; which
+        // host address it is reachable on is the port mapping's business.
+        String bindAddress = launcher.containerised() ? "" : config.serviceBindAddress();
 
         if (group.type() == ServiceType.PROXY) {
             ServiceConfigurator.writeVelocityConfig(directory, info, group, forwardingSecret);
         } else {
             ServiceConfigurator.writeEula(directory);
-            ServiceConfigurator.writeServerProperties(directory, info, group, config.serviceBindAddress());
-            ServiceConfigurator.enableVelocityForwarding(directory, forwardingSecret);
+            ServiceConfigurator.writeServerProperties(directory, info, group, bindAddress);
+            if (software == ServerSoftware.FABRIC) {
+                ServiceConfigurator.writeFabricProxyConfig(directory, forwardingSecret);
+            } else {
+                ServiceConfigurator.enableVelocityForwarding(directory, forwardingSecret);
+            }
         }
 
         writeConnectionFile(token, nodeHost, nodePort);
@@ -186,7 +249,7 @@ public final class ServiceProcess {
         connection.put("serviceName", info.name());
         connection.put("groupName", info.groupName());
         connection.put("token", token);
-        connection.put("nodeHost", nodeHost);
+        connection.put("nodeHost", launcher.nodeHostFor(nodeHost));
         connection.put("nodePort", nodePort);
 
         FileUtil.writeString(directory.resolve("cloud-connection.json"),
@@ -210,7 +273,7 @@ public final class ServiceProcess {
             command.add("nogui");
         }
 
-        ProcessBuilder builder = new ProcessBuilder(command)
+        ProcessBuilder builder = new ProcessBuilder(launcher.command(info, group, directory, command))
                 .directory(directory.toFile())
                 // One stream to pump instead of two, and the interleaving
                 // matches what an operator would see on a normal console.
@@ -306,6 +369,19 @@ public final class ServiceProcess {
         if (streaming) {
             consoleSink.accept(line);
         }
+
+        for (ConsoleWaiter waiter : waiters) {
+            if (waiter.match().test(line)) {
+                waiter.result().complete(line);
+            }
+        }
+
+        // "Done (1.234s)!" is what every vanilla-derived server prints once it
+        // is accepting players. A last resort, used only without the plugin.
+        Runnable ready = logReadySink;
+        if (ready != null && line.contains("Done (") && logReadyReported.compareAndSet(false, true)) {
+            ready.run();
+        }
     }
 
     /** The last few console lines, for a crash report. */
@@ -380,16 +456,7 @@ public final class ServiceProcess {
             }
         }
 
-        current.destroy();
-        try {
-            if (!current.waitFor(TERMINATE_SECONDS, TimeUnit.SECONDS)) {
-                LOGGER.warn("{} survived termination, killing it", info.name());
-                current.destroyForcibly();
-            }
-        } catch (InterruptedException exception) {
-            Thread.currentThread().interrupt();
-            current.destroyForcibly();
-        }
+        launcher.kill(info, current);
     }
 
     private void cleanup() {

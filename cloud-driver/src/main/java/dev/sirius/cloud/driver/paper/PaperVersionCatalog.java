@@ -35,7 +35,7 @@ import java.util.Optional;
  * {@link #from(String)}), never as a numeric comparison. New Minecraft releases
  * therefore work with no code change at all, whatever they end up being called.
  */
-public final class PaperVersionCatalog {
+public final class PaperVersionCatalog implements VersionCatalog {
 
     private static final CloudLogger LOGGER = CloudLogger.of("PaperVersions");
 
@@ -62,11 +62,13 @@ public final class PaperVersionCatalog {
         this.project = project;
     }
 
+    @Override
     public String project() {
         return project;
     }
 
     /** Oldest first, newest last, exactly as PaperMC orders them. */
+    @Override
     public synchronized List<String> versions() throws IOException {
         if (!cached.isEmpty() && System.currentTimeMillis() - cachedAt < CACHE_TTL.toMillis()) {
             return cached;
@@ -108,6 +110,7 @@ public final class PaperVersionCatalog {
      * "latest" for a server they intend to run. Pre-releases stay available by
      * naming them explicitly.
      */
+    @Override
     public String latest() throws IOException {
         List<String> versions = versions();
 
@@ -125,6 +128,7 @@ public final class PaperVersionCatalog {
     }
 
     /** The newest version of any kind, pre-releases included. */
+    @Override
     public String newestPublished() throws IOException {
         List<String> versions = versions();
         return versions.get(versions.size() - 1);
@@ -154,6 +158,7 @@ public final class PaperVersionCatalog {
      *
      * @throws IOException if the version is not one PaperMC publishes
      */
+    @Override
     public String resolve(String version) throws IOException {
         if (version == null || version.isBlank() || "latest".equalsIgnoreCase(version)) {
             return latest();
@@ -179,6 +184,7 @@ public final class PaperVersionCatalog {
      * returns the whole list rather than nothing, because hiding every version
      * over a typo in a config file is the worse failure.
      */
+    @Override
     public List<String> from(String first) throws IOException {
         List<String> versions = versions();
         if (first == null || first.isBlank()) {

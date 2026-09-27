@@ -6,21 +6,30 @@ import dev.sirius.cloud.api.platform.Platform;
 import dev.sirius.cloud.driver.RemoteCloudDriver;
 import dev.sirius.cloud.driver.config.DirectoryLock;
 import dev.sirius.cloud.driver.config.JsonConfig;
+import dev.sirius.cloud.api.service.ServerSoftware;
+import dev.sirius.cloud.driver.paper.FabricVersionCatalog;
 import dev.sirius.cloud.driver.paper.PaperVersionCatalog;
+import dev.sirius.cloud.driver.paper.PurpurVersionCatalog;
+import dev.sirius.cloud.driver.paper.VersionCatalog;
 import dev.sirius.cloud.protocol.connection.NetworkClient;
 import dev.sirius.cloud.protocol.packet.PacketRegistry;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleHistoryPacket;
 import dev.sirius.cloud.protocol.packet.impl.ConsoleLinePacket;
 import dev.sirius.cloud.protocol.packet.impl.HeartbeatPacket;
 import dev.sirius.cloud.protocol.packet.impl.PortUnavailablePacket;
+import dev.sirius.cloud.protocol.packet.impl.ServiceReadyPacket;
 import dev.sirius.cloud.protocol.packet.impl.TemplateChangedPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceCrashReportPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceStateUpdatePacket;
 import dev.sirius.cloud.wrapper.config.WrapperConfig;
+import dev.sirius.cloud.wrapper.jar.FabricMods;
 import dev.sirius.cloud.wrapper.jar.JarResolver;
 import dev.sirius.cloud.wrapper.java.JavaRuntime;
 import dev.sirius.cloud.wrapper.java.JavaRuntimeResolver;
 import dev.sirius.cloud.wrapper.network.WrapperPacketHandler;
+import dev.sirius.cloud.wrapper.process.DirectLauncher;
+import dev.sirius.cloud.wrapper.process.DockerLauncher;
+import dev.sirius.cloud.wrapper.process.ServiceLauncher;
 import dev.sirius.cloud.wrapper.process.ServiceProcessManager;
 import dev.sirius.cloud.wrapper.setup.Prompter;
 import dev.sirius.cloud.wrapper.setup.WrapperSetup;
@@ -55,7 +64,15 @@ public final class CloudWrapper {
 
     private final NetworkClient client = new NetworkClient(PacketRegistry.standard());
     private final PaperVersionCatalog paperVersions = new PaperVersionCatalog("paper");
+    private final PaperVersionCatalog foliaVersions = new PaperVersionCatalog("folia");
     private final PaperVersionCatalog velocityVersions = new PaperVersionCatalog("velocity");
+    private final PurpurVersionCatalog purpurVersions = new PurpurVersionCatalog();
+    private final FabricVersionCatalog fabricVersions = new FabricVersionCatalog();
+
+    /** One resolver per software, built on first use, since most clouds run one or two. */
+    private final java.util.Map<ServerSoftware, JarResolver> resolvers = new java.util.concurrent.ConcurrentHashMap<>();
+
+    private final ServiceLauncher launcher;
     private final JavaRuntimeResolver javaRuntimes = new JavaRuntimeResolver();
     private final ServiceProcessManager processes;
 
@@ -85,11 +102,14 @@ public final class CloudWrapper {
         Files.createDirectories(jarDirectory);
         Files.createDirectories(templatesDirectory);
 
+        this.launcher = config.isolation().docker() ? new DockerLauncher(config) : new DirectLauncher();
+
         this.processes = new ServiceProcessManager(
                 config,
                 workingDirectory,
-                JarResolver.standard(jarDirectory.resolve("paper"), paperVersions, "paper"),
-                JarResolver.standard(jarDirectory.resolve("velocity"), velocityVersions, "velocity"),
+                software -> resolvers.computeIfAbsent(software, key -> resolverFor(key, jarDirectory)),
+                new FabricMods(jarDirectory.resolve("fabric")),
+                launcher,
                 new TemplateManager(templatesDirectory),
                 javaRuntimes,
                 line -> client.send(new ConsoleLinePacket(line.serviceId(), line.serviceName(), line.line())),
@@ -127,6 +147,18 @@ public final class CloudWrapper {
         reportServiceRuntime();
 
         processes.onPortUnavailable(port -> client.send(new PortUnavailablePacket(port)));
+
+        // Fabric has no cloud plugin to say it is ready, so the log does - and
+        // the wrapper, which is reading the log, tells the node on its behalf.
+        processes.onLogReady(process -> client.send(new ServiceReadyPacket(
+                process.info().uniqueId(), process.group().maxPlayers(),
+                process.group().software().id())));
+        processes.versionResolver((software, version) -> catalogFor(software).resolve(version));
+
+        if (launcher instanceof DockerLauncher docker) {
+            docker.verify();
+            docker.removeLeftovers();
+        }
 
         templateWatcher = new TemplateWatcher(workingDirectory.resolve("local").resolve("templates"),
                 group -> client.send(new TemplateChangedPacket(group)));
@@ -190,6 +222,28 @@ public final class CloudWrapper {
         } catch (java.io.IOException exception) {
             LOGGER.error("  {}", exception.getMessage());
         }
+    }
+
+    private VersionCatalog catalogFor(ServerSoftware software) {
+        return switch (software) {
+            case PAPER -> paperVersions;
+            case FOLIA -> foliaVersions;
+            case VELOCITY -> velocityVersions;
+            case PURPUR -> purpurVersions;
+            case FABRIC -> fabricVersions;
+        };
+    }
+
+    /** Jars are cached per software, so a Paper and a Purpur group never share a file name. */
+    private JarResolver resolverFor(ServerSoftware software, java.nio.file.Path jarDirectory) {
+        java.nio.file.Path directory = jarDirectory.resolve(software.id());
+        return switch (software) {
+            case PAPER -> JarResolver.standard(directory, paperVersions, "paper");
+            case FOLIA -> JarResolver.standard(directory, foliaVersions, "folia");
+            case VELOCITY -> JarResolver.standard(directory, velocityVersions, "velocity");
+            case PURPUR -> JarResolver.purpur(directory, purpurVersions);
+            case FABRIC -> JarResolver.fabric(directory, fabricVersions);
+        };
     }
 
     /**

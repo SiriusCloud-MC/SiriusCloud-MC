@@ -95,8 +95,15 @@ public final class CloudNode {
     private final PlayerManager playerManager;
     private final CommandManager commands = new CommandManager();
     private final NetworkServer server = new NetworkServer(PacketRegistry.standard());
-    private final PaperVersionCatalog paperVersions = new PaperVersionCatalog("paper");
-    private final PaperVersionCatalog velocityVersions = new PaperVersionCatalog("velocity");
+    private final java.util.Map<dev.sirius.cloud.api.service.ServerSoftware, dev.sirius.cloud.driver.paper.VersionCatalog>
+            versionCatalogs = java.util.Map.of(
+                    dev.sirius.cloud.api.service.ServerSoftware.PAPER, new PaperVersionCatalog("paper"),
+                    dev.sirius.cloud.api.service.ServerSoftware.FOLIA, new PaperVersionCatalog("folia"),
+                    dev.sirius.cloud.api.service.ServerSoftware.VELOCITY, new PaperVersionCatalog("velocity"),
+                    dev.sirius.cloud.api.service.ServerSoftware.PURPUR,
+                    new dev.sirius.cloud.driver.paper.PurpurVersionCatalog(),
+                    dev.sirius.cloud.api.service.ServerSoftware.FABRIC,
+                    new dev.sirius.cloud.driver.paper.FabricVersionCatalog());
     private final GroupBackoff backoff = new GroupBackoff();
     private final AutoScaler autoScaler = new AutoScaler();
     private final Rollouts rollouts;
@@ -413,7 +420,7 @@ public final class CloudNode {
         commands.register(new ReloadCommand(groups));
         commands.register(new ExecuteCommand(services, serviceManager));
         commands.register(new AttachCommand(services, serviceManager, console));
-        commands.register(new VersionsCommand(paperVersions, velocityVersions, config.minimumPaperVersion()));
+        commands.register(new VersionsCommand(versionCatalogs, config.minimumPaperVersion()));
         commands.register(new InfoCommand(config, services, wrappers));
         commands.register(new ShutdownCommand(this));
     }

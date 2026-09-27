@@ -24,6 +24,18 @@ public final class JarResolver {
         this.providers = providers;
     }
 
+    public static JarResolver purpur(Path jarDirectory, dev.sirius.cloud.driver.paper.PurpurVersionCatalog catalog) {
+        return new JarResolver(List.of(
+                new PurpurJarProvider(jarDirectory, catalog),
+                new LocalJarProvider(jarDirectory, "purpur")));
+    }
+
+    public static JarResolver fabric(Path jarDirectory, dev.sirius.cloud.driver.paper.FabricVersionCatalog catalog) {
+        return new JarResolver(List.of(
+                new FabricJarProvider(jarDirectory, catalog),
+                new LocalJarProvider(jarDirectory, "fabric")));
+    }
+
     public static JarResolver standard(Path jarDirectory, PaperVersionCatalog catalog, String project) {
         return new JarResolver(List.of(
                 new PaperMcJarProvider(jarDirectory, catalog, project),

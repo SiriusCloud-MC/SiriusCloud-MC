@@ -4,8 +4,10 @@ import dev.sirius.cloud.api.group.ServiceGroup;
 import dev.sirius.cloud.api.logging.CloudLogger;
 import dev.sirius.cloud.api.service.ServiceInfo;
 import dev.sirius.cloud.api.service.ServiceState;
+import dev.sirius.cloud.api.service.ServerSoftware;
 import dev.sirius.cloud.api.service.ServiceType;
 import dev.sirius.cloud.wrapper.config.WrapperConfig;
+import dev.sirius.cloud.wrapper.jar.FabricMods;
 import dev.sirius.cloud.wrapper.jar.JarResolver;
 import dev.sirius.cloud.wrapper.java.JavaRuntime;
 import dev.sirius.cloud.wrapper.java.JavaRuntimeResolver;
@@ -22,6 +24,7 @@ import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /** Owns every service process on this machine. */
 public final class ServiceProcessManager {
@@ -34,8 +37,9 @@ public final class ServiceProcessManager {
     private final Path serverPluginJar;
     private final Path proxyPluginJar;
 
-    private final JarResolver serverJars;
-    private final JarResolver proxyJars;
+    private final Function<ServerSoftware, JarResolver> jars;
+    private final FabricMods fabricMods;
+    private final ServiceLauncher launcher;
     private final TemplateManager templates;
     private final JavaRuntimeResolver javaRuntimes;
 
@@ -47,12 +51,20 @@ public final class ServiceProcessManager {
     /** Told when a service's port turns out to be held by something outside the cloud. */
     private volatile Consumer<Integer> portUnavailableSink = port -> { };
 
+    /** Told when a service without the cloud plugin logs that it finished starting. */
+    private volatile Consumer<ServiceProcess> logReadySink = process -> { };
+
+    public void onLogReady(Consumer<ServiceProcess> sink) {
+        this.logReadySink = sink;
+    }
+
     private final Map<UUID, ServiceProcess> processes = new ConcurrentHashMap<>();
 
     public ServiceProcessManager(WrapperConfig config,
                                  Path workingDirectory,
-                                 JarResolver serverJars,
-                                 JarResolver proxyJars,
+                                 Function<ServerSoftware, JarResolver> jars,
+                                 FabricMods fabricMods,
+                                 ServiceLauncher launcher,
                                  TemplateManager templates,
                                  JavaRuntimeResolver javaRuntimes,
                                  Consumer<ConsoleLine> consoleSink,
@@ -64,8 +76,9 @@ public final class ServiceProcessManager {
         this.staticDirectory = workingDirectory.resolve("local").resolve("static");
         this.serverPluginJar = workingDirectory.resolve("plugins").resolve("cloud-plugin-paper.jar");
         this.proxyPluginJar = workingDirectory.resolve("plugins").resolve("cloud-plugin-velocity.jar");
-        this.serverJars = serverJars;
-        this.proxyJars = proxyJars;
+        this.jars = jars;
+        this.fabricMods = fabricMods;
+        this.launcher = launcher;
         this.templates = templates;
         this.javaRuntimes = javaRuntimes;
         this.consoleSink = consoleSink;
@@ -120,7 +133,14 @@ public final class ServiceProcessManager {
                 templates.prepare(group);
 
                 boolean proxy = group.type() == ServiceType.PROXY;
-                Path serverJar = (proxy ? proxyJars : serverJars).resolve(group.version(), group.build());
+                ServerSoftware software = group.software();
+                Path serverJar = jars.apply(software).resolve(group.version(), group.build());
+
+                // Fabric cannot run the cloud's Bukkit plugin, so it needs the
+                // mod that understands the proxy's forwarding instead.
+                List<Path> mods = software == ServerSoftware.FABRIC
+                        ? fabricMods.resolve(resolvedVersion(group, software))
+                        : List.of();
 
                 Path directory = group.staticService()
                         ? staticDirectory.resolve(info.name())
@@ -132,6 +152,7 @@ public final class ServiceProcessManager {
                         config,
                         directory,
                         java,
+                        launcher,
                         line -> consoleSink.accept(new ConsoleLine(info.uniqueId(), info.name(), line)),
                         (state, exitCode) -> {
                             stateSink.accept(info.uniqueId(), new StateChange(state, exitCode));
@@ -142,8 +163,12 @@ public final class ServiceProcessManager {
                         (exitCode, lastLines) -> crashSink.accept(
                                 new CrashReport(info.uniqueId(), info.name(), exitCode, lastLines)));
 
+                if (!software.runsCloudPlugin()) {
+                    process.onLogReady(() -> logReadySink.accept(process));
+                }
+
                 processes.put(info.uniqueId(), process);
-                process.start(serverJar, proxy ? proxyPluginJar : serverPluginJar,
+                process.start(serverJar, proxy ? proxyPluginJar : serverPluginJar, mods,
                         templates, token, nodeHost, nodePort, forwardingSecret);
 
             } catch (IOException exception) {
@@ -277,6 +302,10 @@ public final class ServiceProcessManager {
      * pinned path, then detection of a qualifying installation.
      */
     private String javaFor(dev.sirius.cloud.api.group.ServiceGroup group) throws IOException {
+        if (launcher.containerised()) {
+            // The container image brings its own JVM; this machine's is irrelevant.
+            return "java";
+        }
         if (!group.javaExecutable().isBlank()) {
             return group.javaExecutable();
         }
@@ -285,6 +314,27 @@ public final class ServiceProcessManager {
         }
         JavaRuntime runtime = javaRuntimes.require(config.serviceJavaVersion());
         return runtime.executable().toString();
+    }
+
+    /** The concrete Minecraft version a group resolves to, which Fabric's mods must match. */
+    private String resolvedVersion(ServiceGroup group, ServerSoftware software) throws IOException {
+        return versionResolver.apply(software, group.version());
+    }
+
+    /** Resolves "latest" per software; set by the wrapper, which owns the catalogs. */
+    private volatile VersionResolver versionResolver = (software, version) -> version;
+
+    @FunctionalInterface
+    public interface VersionResolver {
+        String apply(ServerSoftware software, String version) throws IOException;
+    }
+
+    public void versionResolver(VersionResolver resolver) {
+        this.versionResolver = resolver;
+    }
+
+    public java.util.Optional<ServiceProcess> process(UUID serviceId) {
+        return java.util.Optional.ofNullable(processes.get(serviceId));
     }
 
     /** A lifecycle transition observed by the wrapper. */

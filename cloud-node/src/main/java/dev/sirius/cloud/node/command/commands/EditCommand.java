@@ -26,7 +26,7 @@ public final class EditCommand implements Command {
     private static final List<String> FIELDS = List.of(
             "memory", "minmemory", "min", "max", "maxplayers",
             "version", "build", "port", "static", "fallback", "java",
-            "timeout", "autoscale", "scaleup", "scaledown", "maxuptime", "rollout");
+            "timeout", "autoscale", "scaleup", "scaledown", "maxuptime", "rollout", "software", "cpus");
 
     private final GroupRegistry groups;
 
@@ -87,6 +87,10 @@ public final class EditCommand implements Command {
                 case "scaledown" -> group.autoscale().scaleDownAfterEmptySeconds(positive(value));
                 case "maxuptime" -> group.maxUptimeMinutes(whole(value));
                 case "rollout" -> group.rolloutOnTemplateChange(flag(value));
+                case "software" -> group.software(dev.sirius.cloud.api.service.ServerSoftware.byId(value)
+                        .orElseThrow(() -> new IllegalArgumentException(
+                                "'" + value + "' is not paper, purpur, folia, fabric or velocity")));
+                case "cpus" -> group.cpuLimit(cores(value));
                 default -> {
                     LOGGER.warn("Unknown field '{}'. One of: {}", field, String.join(", ", FIELDS));
                     return;
@@ -135,6 +139,18 @@ public final class EditCommand implements Command {
         return parsed;
     }
 
+    private static double cores(String value) {
+        try {
+            double parsed = Double.parseDouble(value.trim());
+            if (parsed < 0) {
+                throw new IllegalArgumentException("'" + value + "' must not be negative");
+            }
+            return parsed;
+        } catch (NumberFormatException exception) {
+            throw new IllegalArgumentException("'" + value + "' is not a number of cores");
+        }
+    }
+
     private static int percent(String value) {
         int parsed = positive(value);
         if (parsed > 100) {
@@ -170,6 +186,7 @@ public final class EditCommand implements Command {
                 case "static", "fallback", "autoscale", "rollout" -> List.of("on", "off");
                 case "version", "build" -> List.of("latest");
                 case "java" -> List.of("default");
+                case "software" -> List.of("paper", "purpur", "folia", "fabric", "velocity");
                 default -> List.of();
             };
         }

@@ -56,6 +56,62 @@ public final class WrapperConfig {
      */
     private String serviceBindAddress = "";
 
+    /** How services are run; see {@link Isolation}. */
+    private Isolation isolation = new Isolation();
+
+    /**
+     * Running services in containers.
+     *
+     * <p>{@code none} runs each service as a child process, as always. With
+     * {@code docker} each gets its own container with a memory and CPU cap, so
+     * one runaway server cannot starve the machine. The image must provide a
+     * {@code java} new enough for the Minecraft version, which is why the
+     * default tracks the Java the servers already need.
+     */
+    public static final class Isolation {
+
+        private String mode = "none";
+        private String image = "eclipse-temurin:25-jre";
+        private String dockerBinary = "docker";
+
+        /** Added to the heap for the container's memory cap; a JVM uses more than its heap. */
+        private int memoryOverheadMb = 384;
+
+        /** CPU cores per service when the group sets none; 0 for no limit. */
+        private double defaultCpuLimit = 0;
+
+        public boolean docker() {
+            return "docker".equalsIgnoreCase(mode == null ? "" : mode.trim());
+        }
+
+        public String mode() {
+            return mode == null || mode.isBlank() ? "none" : mode;
+        }
+
+        public String image() {
+            return image == null || image.isBlank() ? "eclipse-temurin:25-jre" : image;
+        }
+
+        public String dockerBinary() {
+            return dockerBinary == null || dockerBinary.isBlank() ? "docker" : dockerBinary;
+        }
+
+        public int memoryOverheadMb() {
+            return memoryOverheadMb < 0 ? 384 : memoryOverheadMb;
+        }
+
+        public double defaultCpuLimit() {
+            return Math.max(0, defaultCpuLimit);
+        }
+    }
+
+    public Isolation isolation() {
+        if (isolation == null) {
+            isolation = new Isolation();
+        }
+        return isolation;
+    }
+
     /** Whether interactive setup has run. See NodeConfig for why this is tracked. */
     private boolean setupCompleted = false;
 

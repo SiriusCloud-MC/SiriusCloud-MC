@@ -3,6 +3,7 @@ package dev.sirius.cloud.node.setup;
 import dev.sirius.cloud.api.group.ServiceGroup;
 import dev.sirius.cloud.api.logging.CloudLogger;
 import dev.sirius.cloud.api.platform.SystemMemory;
+import dev.sirius.cloud.api.service.ServerSoftware;
 import dev.sirius.cloud.api.service.ServiceType;
 import dev.sirius.cloud.driver.config.JsonConfig;
 import dev.sirius.cloud.node.config.NodeConfig;
@@ -248,6 +249,26 @@ public final class FirstRunSetup {
         int maxPlayers = console.askInt("Max players per server", 50, 1, 10000);
 
         console.print("");
+        ServerSoftware software;
+        while (true) {
+            String answer = console.ask("Server software (paper, purpur, folia, fabric)", "paper");
+            var chosen = ServerSoftware.byId(answer)
+                    .filter(candidate -> candidate.type() == ServiceType.SERVER);
+            if (chosen.isPresent()) {
+                software = chosen.get();
+                break;
+            }
+            console.print("  '" + answer + "' is not one of those.");
+        }
+        if (software == ServerSoftware.FABRIC) {
+            // Said now rather than discovered later as a group that never grows.
+            console.print("  Fabric cannot run the cloud's plugin: it is marked ready from its log, and");
+            console.print("  reports no player counts, so it does not autoscale. Mods for proxy");
+            console.print("  forwarding are installed automatically.");
+        } else if (software == ServerSoftware.FOLIA) {
+            console.print("  Plugins must declare Folia support. The cloud's does; the optional");
+            console.print("  permissions plugin does not, and Folia will refuse to load it.");
+        }
         String version = console.ask("Minecraft version ('latest' = newest stable)", "latest");
         int startPort = console.askInt("First port for these servers", nextFreePortRange(), 1024, 65000);
         boolean staticService = console.confirm(
@@ -266,6 +287,7 @@ public final class FirstRunSetup {
         group.maxServiceCount(maximum);
         group.maxPlayers(maxPlayers);
         group.version(version);
+        group.software(software);
         group.startPort(startPort);
         group.staticService(staticService);
         group.fallback(fallback);
