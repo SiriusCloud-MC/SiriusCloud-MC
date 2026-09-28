@@ -21,6 +21,7 @@ Runs on **Linux and Windows**.
 | [The API and the panel](#the-api-and-the-panel) | HTTP and the web panel |
 | [In game](#in-game) | `/cloud` and notifications |
 | [Network features](#network-features) | maintenance, parties, friends, bans, queues, metrics, Discord |
+| [Lobby](#lobby) | game menu, lobby switcher, profile, sidebar, protection |
 | [LuckPerms](#luckperms) and [Permissions](#permissions) | pick one |
 
 | | Java |
@@ -1088,6 +1089,15 @@ room and the group allows another server, one is started.
 A party leader queues the whole party, which only ever lands together. Games
 are every non-fallback server group unless `playableGroups` lists them.
 
+Plugins queue players the same way, which is how the [lobby](#lobby)'s game
+menu does it: publish `{"player": "<uuid>", "game": "<group>"}` to the node on
+the channel `matchmaking:queue` (and `{"player": "<uuid>"}` on
+`matchmaking:leave`):
+
+```java
+CloudDriver.instance().messaging().publishTo(MessagingProvider.NODE, "matchmaking:queue", json);
+```
+
 ### Metrics
 
 Prometheus metrics at `http://127.0.0.1:9225/metrics`: players, services per
@@ -1108,6 +1118,68 @@ reports crashes (with the last lines of the log), wrappers disconnecting, failed
 backups and servers below `lowTps` (one alert per server per ten minutes).
 Service starts and stops can be turned on too. With no URL the module does
 nothing.
+
+---
+
+## Lobby
+
+A lobby plugin for your lobby group's servers, built on the cloud: everything
+it shows is live from the network.
+
+| | |
+|---|---|
+| **Game menu** (compass) | Every game with how many play it and how many servers run, and whether it is open, starting or in maintenance. A click queues through [matchmaking](#matchmaking), so parties stay together and a server starts if none has room. With no configuration it lists every non-lobby server group by itself. |
+| **Lobby switcher** (nether star) | Every lobby server with its players; the one you are on is marked, full ones are red. A click moves you. |
+| **Profile** (your head) | Playtime, first joined, last seen and past names, from the cloud's player profiles. |
+| **Player visibility** (dye) | Hides or shows everyone else. |
+| **Sidebar** | Rank, lobby, players online across the network, and your own lines. Rank prefixes above heads keep working. |
+| **Movement** | Double jump, launch pads, and falling into the void takes you back to spawn. |
+| **Protection** | No damage, hunger, building, item dropping, weather or mob spawning; a fixed time of day. Each can be turned back on. |
+| **Joining** | Spawn, a clean inventory, a title and a welcome message; no join or quit lines in chat. |
+
+### Installing it
+
+Put it into the lobby group's template, so every lobby server gets it,
+including ones autoscaling starts:
+
+```bash
+cp wrapper/optional-plugins/cloud-plugin-lobby.jar wrapper/local/templates/Lobby/default/plugins/
+```
+
+Changing the template rolls the lobby servers over to it automatically. The
+plugin writes its `config.yml` on first start, in the running server's
+`plugins/SiriusCloudLobby/`. To change it for every lobby, copy it into the
+template next to the jar, at
+`wrapper/local/templates/Lobby/default/plugins/SiriusCloudLobby/config.yml`,
+and edit it there. Text is MiniMessage.
+
+```yaml
+games:
+  entries:
+    bedwars:
+      group: BedWars
+      slot: 11
+      material: RED_BED
+      name: "<red><bold>BedWars"
+      lore: ["<gray>Destroy their bed, defend yours."]
+      action: queue        # or: connect, straight to the least busy server
+```
+
+| Command | Permission | |
+|---|---|---|
+| `/spawn` | everyone | Back to spawn |
+| `/setspawn` | `siriuscloud.lobby.admin` | Spawn where you stand; saved into `config.yml` |
+| `/build` | `siriuscloud.lobby.build` | Creative, and the protection off, for you only |
+| `/lobbyreload` | `siriuscloud.lobby.admin` | Re-reads `config.yml` |
+| | `siriuscloud.lobby.fly` | Real flight instead of double jump |
+
+`/setspawn` saves into the running server's own `config.yml`, so copy that
+file into the template afterwards, or every new lobby server starts at the
+world's spawn. The same goes for the world itself: build your lobby, then put
+its world folder into the template.
+
+It runs on Paper and Purpur. Queueing needs the matchmaking module on the
+node, which ships enabled; with it turned off, set entries to `connect`.
 
 ---
 

@@ -1,0 +1,112 @@
+# SiriusCloud lobby. Text is MiniMessage: https://docs.advntr.dev/minimessage/format
+# Put this plugin, and this file once edited, into your lobby group's template:
+#   wrapper/local/templates/<Lobby group>/default/plugins/
+# so every lobby server - including ones started by autoscaling - is the same.
+
+# Where players appear. Set it in game with /setspawn; empty means the world's spawn.
+spawn: ""
+
+join:
+  gamemode: ADVENTURE
+  title: "<gradient:#5e9cff:#b06cff><bold>SiriusCloud</bold></gradient>"
+  subtitle: "<gray>Welcome, <white>{player}"
+  # Sent in chat on join. {player}, {lobby}, {online}.
+  message:
+    - ""
+    - "  <gradient:#5e9cff:#b06cff><bold>SiriusCloud</bold></gradient> <dark_gray>| <gray>You are on <white>{lobby}"
+    - "  <gray>Pick a game with the <aqua>compass<gray>. <dark_gray>{online} online"
+    - ""
+  # Hide vanilla "joined the game" / "left the game" lines.
+  hide-join-quit-messages: true
+
+hotbar:
+  games:
+    slot: 0
+    material: COMPASS
+    name: "<aqua><bold>Games</bold> <gray>(right-click)"
+  lobbies:
+    slot: 1
+    material: NETHER_STAR
+    name: "<yellow><bold>Lobbies</bold> <gray>(right-click)"
+  profile:
+    slot: 4
+    # A player head of the player themselves.
+    name: "<green><bold>Profile</bold> <gray>(right-click)"
+  visibility:
+    slot: 8
+    shown-material: LIME_DYE
+    hidden-material: GRAY_DYE
+    shown-name: "<gray>Players: <green>shown <gray>(right-click)"
+    hidden-name: "<gray>Players: <red>hidden <gray>(right-click)"
+
+games:
+  title: "<dark_gray>Games"
+  rows: 3
+  # Leave empty to list every server group that is not a lobby, automatically.
+  # Otherwise, one entry per game:
+  #   bedwars:
+  #     group: BedWars          the cloud group
+  #     slot: 11
+  #     material: RED_BED
+  #     name: "<red><bold>BedWars"
+  #     lore: ["<gray>Destroy their bed, defend yours."]
+  #     action: queue           queue: the matchmaking queue, parties stay together
+  #                             connect: straight to the least busy server
+  entries: {}
+
+lobbies:
+  title: "<dark_gray>Lobbies"
+  # The group to list. Empty means this server's own group.
+  group: ""
+
+sidebar:
+  enabled: true
+  title: "<gradient:#5e9cff:#b06cff><bold>SiriusCloud</bold></gradient>"
+  # {player}, {rank}, {lobby}, {online}, {lobby-players}
+  lines:
+    - "<dark_gray>{date}"
+    - ""
+    - "<gray>Rank <white>{rank}"
+    - "<gray>Lobby <white>{lobby}"
+    - ""
+    - "<gray>Online <white>{online}"
+    - ""
+    - "<aqua>play.example.net"
+  # Shown for {rank} when a player has no prefix.
+  no-rank: "<gray>Player"
+
+movement:
+  double-jump: true
+  double-jump-power: 1.1
+  double-jump-height: 0.9
+  launch-pads: true
+  launch-pad-block: LIGHT_WEIGHTED_PRESSURE_PLATE
+  launch-power: 2.4
+  launch-height: 1.0
+  # Below this height, players go back to spawn instead of falling forever.
+  void-height: 0
+
+protection:
+  damage: false
+  hunger: false
+  build: false
+  drop-items: false
+  weather: false
+  mobs: false
+  # Fixed time of day (0-24000), or -1 to let it run.
+  time: 6000
+
+messages:
+  queued: "<gray>Looking for a <white>{game}<gray> game..."
+  connecting: "<gray>Sending you to <white>{server}<gray>..."
+  already-here: "<red>You are already on this lobby."
+  offline: "<red>{game} is not running right now."
+  maintenance: "<red>{game} is in maintenance."
+  failed: "<red>That did not work: {reason}"
+  players-shown: "<green>Players are visible again."
+  players-hidden: "<gray>Other players are hidden."
+  wait: "<red>Wait a moment before doing that again."
+  spawn-set: "<green>Spawn set here."
+  build-on: "<yellow>Build mode on. <gray>/build again to turn it off."
+  build-off: "<gray>Build mode off."
+  reloaded: "<green>Lobby config reloaded."

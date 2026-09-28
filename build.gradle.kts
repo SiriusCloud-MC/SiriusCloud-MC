@@ -59,13 +59,14 @@ val dist by tasks.registering(Copy::class) {
     val notifyModule = project(":cloud-modules:notify").tasks.named("jar")
     val permissionsModule = project(":cloud-modules:permissions").tasks.named("jar")
     val permissionsPlugin = project(":cloud-plugins:permissions").tasks.named("jar")
+    val lobbyPlugin = project(":cloud-plugins:lobby").tasks.named("jar")
     // The network feature modules. Each carries its own copy of the shared
     // helpers in cloud-modules/common, which is therefore not shipped itself.
     val featureModules = listOf("display", "social", "moderation", "matchmaking", "metrics", "discord")
             .associateWith { project(":cloud-modules:$it").tasks.named("jar") }
 
     dependsOn(nodeJar, wrapperJar, paperPlugin, velocityPlugin, restModule, notifyModule,
-            permissionsModule, permissionsPlugin)
+            permissionsModule, permissionsPlugin, lobbyPlugin)
     dependsOn(featureModules.values)
 
     into(layout.buildDirectory.dir("dist"))
@@ -118,6 +119,11 @@ val dist by tasks.registering(Copy::class) {
     from(permissionsPlugin) {
         into("wrapper/optional-plugins")
         rename { "cloud-plugin-permissions.jar" }
+    }
+    // The lobby plugin, for lobby groups' templates only.
+    from(lobbyPlugin) {
+        into("wrapper/optional-plugins")
+        rename { "cloud-plugin-lobby.jar" }
     }
     from("scripts") {
         into(".")

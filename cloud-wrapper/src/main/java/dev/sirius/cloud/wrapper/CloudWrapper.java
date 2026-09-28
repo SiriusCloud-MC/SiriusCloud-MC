@@ -263,7 +263,8 @@ public final class CloudWrapper {
                 return switch (asset) {
                     case "cloud-wrapper.jar" -> Optional.of(asset);
                     case "cloud-plugin-paper.jar", "cloud-plugin-velocity.jar" -> Optional.of("plugins/" + asset);
-                    case "cloud-plugin-permissions.jar" -> Optional.of("optional-plugins/" + asset);
+                    case "cloud-plugin-permissions.jar", "cloud-plugin-lobby.jar" ->
+                            Optional.of("optional-plugins/" + asset);
                     default -> Optional.empty();
                 };
             }

@@ -51,6 +51,11 @@ public final class MatchmakingModule implements CloudModule {
 
     private static final CloudLogger LOGGER = CloudLogger.of("Matchmaking");
 
+    /** For plugins: publish {@code {"player": "<uuid>", "game": "<group>"}} to the node on this channel. */
+    public static final String QUEUE_CHANNEL = "matchmaking:queue";
+    /** For plugins: {@code {"player": "<uuid>"}} leaves whatever queue the player is in. */
+    public static final String LEAVE_CHANNEL = "matchmaking:leave";
+
     /** A service started for the queue gets this long to come up before another is tried. */
     private static final long START_GRACE_MILLIS = 90_000;
 
@@ -95,12 +100,33 @@ public final class MatchmakingModule implements CloudModule {
                 .executes((sender, args) -> lane.execute(() -> leave(sender)))
                 .build());
 
+        // Plugins queue players the same way /play does: {"player": uuid, "game": group}.
+        driver.messaging().subscribe(QUEUE_CHANNEL, message -> onRequest(message.payload(), true));
+        driver.messaging().subscribe(LEAVE_CHANNEL, message -> onRequest(message.payload(), false));
+
         driver.events().subscribe(PlayerDisconnectEvent.class,
                 event -> lane.execute(() -> dropPlayer(event.player().uniqueId(), event.player().name())));
     }
 
+    private void onRequest(String payload, boolean join) {
+        try {
+            JsonObject request = JsonParser.parseString(payload).getAsJsonObject();
+            UUID player = UUID.fromString(request.get("player").getAsString());
+            if (join) {
+                String game = request.get("game").getAsString();
+                lane.execute(() -> queue(player, game));
+            } else {
+                lane.execute(() -> leave(player));
+            }
+        } catch (RuntimeException malformed) {
+            LOGGER.debug("Ignoring a malformed queue request: {}", payload);
+        }
+    }
+
     @Override
     public void onDisable() {
+        driver.messaging().unsubscribe(QUEUE_CHANNEL);
+        driver.messaging().unsubscribe(LEAVE_CHANNEL);
         registered.forEach(driver.network()::unregisterCommand);
         registered.clear();
         if (lane != null) {
@@ -125,27 +151,36 @@ public final class MatchmakingModule implements CloudModule {
             sender.sendMessage("<gray>Usage: /play <game>. Games: <white>" + String.join(", ", playable()));
             return;
         }
-        Optional<String> group = playable().stream().filter(name -> name.equalsIgnoreCase(args[0])).findFirst();
+        queue(self.get(), args[0]);
+    }
+
+    /**
+     * Queues a player, and their party if they lead one. The same whether it
+     * came from {@code /play} or from a plugin - a lobby's game menu, say -
+     * through {@link #QUEUE_CHANNEL}.
+     */
+    private void queue(UUID self, String game) {
+        Optional<String> group = playable().stream().filter(name -> name.equalsIgnoreCase(game)).findFirst();
         if (group.isEmpty()) {
-            sender.sendMessage("<red>There is no game called " + Text.escape(args[0])
+            tell(self, "<red>There is no game called " + Text.escape(game)
                     + ". <gray>Games: <white>" + String.join(", ", playable()));
             return;
         }
 
-        List<UUID> members = party(self.get());
+        List<UUID> members = party(self);
         if (members == null) {
-            sender.sendMessage("<red>Only your party leader can queue for the party.");
+            tell(self, "<red>Only your party leader can queue for the party.");
             return;
         }
         Optional<ServiceGroup> definition = driver.groups().cachedGroup(group.get());
         if (definition.isPresent() && members.size() > definition.get().maxPlayers()) {
-            sender.sendMessage("<red>Your party is larger than a " + group.get() + " server holds.");
+            tell(self, "<red>Your party is larger than a " + group.get() + " server holds.");
             return;
         }
 
         // Queueing again moves you: whatever you were waiting for, you now want this.
         members.forEach(this::removeTicketOf);
-        Ticket ticket = new Ticket(self.get(), members, group.get(), System.currentTimeMillis());
+        Ticket ticket = new Ticket(self, members, group.get(), System.currentTimeMillis());
         queues.computeIfAbsent(group.get(), key -> new ArrayList<>()).add(ticket);
 
         int position = queues.get(group.get()).size();
@@ -156,16 +191,16 @@ public final class MatchmakingModule implements CloudModule {
     }
 
     private void leave(CommandSender sender) {
-        Optional<UUID> self = sender.uniqueId();
-        if (self.isEmpty()) {
-            return;
-        }
-        Optional<Ticket> ticket = ticketOf(self.get());
+        sender.uniqueId().ifPresent(this::leave);
+    }
+
+    private void leave(UUID self) {
+        Optional<Ticket> ticket = ticketOf(self);
         if (ticket.isEmpty()) {
-            sender.sendMessage("<red>You are not in a queue.");
+            tell(self, "<red>You are not in a queue.");
             return;
         }
-        removeTicketOf(self.get());
+        removeTicketOf(self);
         ticket.get().members().forEach(member -> tell(member, "<yellow>Left the queue for " + ticket.get().group() + "."));
     }
 

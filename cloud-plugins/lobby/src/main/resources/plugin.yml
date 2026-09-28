@@ -1,0 +1,37 @@
+name: SiriusCloudLobby
+version: '${version}'
+main: dev.sirius.cloud.plugin.lobby.LobbyPlugin
+api-version: '1.21'
+author: Sirius
+description: Game menu, lobby switcher, profile, sidebar and protection for SiriusCloud lobbies.
+website: https://siriuscloud-mc.github.io/SiriusCloud-MC/
+
+# The core plugin binds CloudDriver and ships the API this one uses.
+depend:
+  - SiriusCloud
+softdepend:
+  - SiriusCloudPermissions
+
+commands:
+  spawn:
+    description: Back to the lobby spawn.
+  setspawn:
+    description: Sets the lobby spawn where you stand.
+    permission: siriuscloud.lobby.admin
+  build:
+    description: Toggles building in the lobby for yourself.
+    permission: siriuscloud.lobby.build
+  lobbyreload:
+    description: Reloads the lobby's config.yml.
+    permission: siriuscloud.lobby.admin
+
+permissions:
+  siriuscloud.lobby.admin:
+    description: /setspawn and /lobbyreload.
+    default: op
+  siriuscloud.lobby.build:
+    description: /build, to change the lobby.
+    default: op
+  siriuscloud.lobby.fly:
+    description: Real flight in the lobby instead of double jump.
+    default: op
