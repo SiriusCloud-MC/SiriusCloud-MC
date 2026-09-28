@@ -259,12 +259,72 @@ sirius@node> stop Lobby-1
 | `versions [paper\|purpur\|folia\|fabric\|velocity] [--all]` | Versions available to groups |
 | `info` | Node status and connected wrappers |
 | `migrate` | Data version, migration history and backups |
+| `update [check\|now]` | Version, and new releases; see [Updating](#updating) |
 | `cluster [status\|init\|join\|add\|remove\|promote]` | Runs several nodes as one; see [Clustering](#clustering) |
 | `shutdown` | Stops everything, then the node |
 
 ---
 
 ## Updating
+
+### Automatically
+
+Nodes and wrappers check GitHub for new releases every 6 hours, download them,
+check every file against the release's `SHA256SUMS`, and install them by
+restarting:
+
+| | Installs by itself | Servers |
+|---|---|---|
+| **Node** | Straight away. In a cluster, one node at a time: followers first, spread over a few minutes, the leader last, and only while every member is reachable. | Keep running. Wrappers reconnect and are adopted, as after any node restart. |
+| **Wrapper** | Only while it runs no servers, since they are its child processes. Otherwise on its next restart. | Stop while the wrapper restarts, so it waits for you. |
+
+The wrapper also updates the plugins it gives servers (`plugins/`,
+`optional-plugins/`); servers get them the next time they start. Modules are
+updated if they are installed: one you deleted to turn it off stays deleted.
+
+This needs the **start scripts**: they install a downloaded update before
+starting, and start the process again when it asks to be restarted. Started
+any other way, updates are downloaded but not installed.
+
+```
+sirius@node> update
+Version    : 1.0.4
+Downloaded : 1.0.5
+Last check : 1.0.5 downloaded, installs on the next start
+Launcher   : start script, so updates can be installed
+```
+
+`update check` looks now, `update now` installs straight away. Settings, in
+the node's and each wrapper's `config.json`:
+
+```json
+"updates": {
+  "mode": "auto",
+  "repository": "SiriusCloud-MC/SiriusCloud-MC",
+  "checkEveryHours": 6,
+  "preReleases": false
+}
+```
+
+`mode` is `auto`, `download` (install on the next manual restart), `notify`
+(only say so) or `off`. A build made from source reports `1.0.0-SNAPSHOT`, so
+it moves to the first proper release; set `off` to keep a build of your own.
+
+**Publishing a release:** push a version tag, and the release workflow builds,
+tests and publishes every jar with `SHA256SUMS` and a full zip:
+
+```bash
+git tag v1.0.4
+```
+
+```bash
+git push origin v1.0.4
+```
+
+A release without `SHA256SUMS` is never installed, so releases made by hand
+from a zip are left alone.
+
+### By hand
 
 1. Stop the node and the wrappers (`shutdown`).
 2. Replace the program files with the new build's, and nothing else:

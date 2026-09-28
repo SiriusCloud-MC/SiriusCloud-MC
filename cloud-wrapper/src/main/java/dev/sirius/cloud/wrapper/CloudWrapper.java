@@ -5,6 +5,10 @@ import dev.sirius.cloud.api.logging.CloudLogger;
 import dev.sirius.cloud.api.platform.Platform;
 import dev.sirius.cloud.driver.RemoteCloudDriver;
 import dev.sirius.cloud.driver.config.DirectoryLock;
+import dev.sirius.cloud.driver.update.UpdateService;
+import dev.sirius.cloud.driver.update.UpdateSettings;
+import dev.sirius.cloud.driver.update.Updater;
+import dev.sirius.cloud.driver.update.Version;
 import dev.sirius.cloud.driver.migration.Migrator;
 import dev.sirius.cloud.wrapper.migration.WrapperMigrations;
 import dev.sirius.cloud.driver.config.JsonConfig;
@@ -217,8 +221,82 @@ public final class CloudWrapper {
             LOGGER.info("Connecting to node at {}:{}", config.nodeHost(), config.nodePort());
         }
 
+        startUpdates();
+
         // The wrapper has no console of its own; it idles until it is stopped.
         shutdownLatch.await();
+    }
+
+    // ------------------------------------------------------------- updates
+
+    private static final String BUILD = CloudWrapper.class.getPackage().getImplementationVersion();
+
+    private UpdateService updates;
+    private volatile Version pendingUpdate;
+    private volatile boolean announcedWait;
+    private volatile int exitCode;
+
+    /** What the process exits with once {@link #start()} returns. */
+    public int exitCode() {
+        return exitCode;
+    }
+
+    /**
+     * Checks for new releases. A wrapper cannot restart without stopping the
+     * servers it runs - they are its child processes - so it installs an
+     * update by itself only while it runs none, and otherwise the next time
+     * it is restarted. The plugins it gives servers are updated with it.
+     */
+    private void startUpdates() {
+        Optional<Version> current = Version.parse(BUILD);
+        if (current.isEmpty()) {
+            return;
+        }
+        Updater updater = new Updater(workingDirectory, current.get(), config.updates(), new Updater.Layout() {
+            @Override
+            public String mainAsset() {
+                return "cloud-wrapper.jar";
+            }
+
+            @Override
+            public Optional<String> target(String asset) {
+                return switch (asset) {
+                    case "cloud-wrapper.jar" -> Optional.of(asset);
+                    case "cloud-plugin-paper.jar", "cloud-plugin-velocity.jar" -> Optional.of("plugins/" + asset);
+                    case "cloud-plugin-permissions.jar" -> Optional.of("optional-plugins/" + asset);
+                    default -> Optional.empty();
+                };
+            }
+        });
+        updates = new UpdateService(updater, config.updates(), version -> {
+            if (config.updates().mode() == UpdateSettings.Mode.AUTO && UpdateService.hasLauncher()) {
+                pendingUpdate = version;
+            } else {
+                LOGGER.info("Restart this wrapper to install {}. Servers on it stop while it restarts.", version);
+            }
+        });
+        updates.start();
+        scheduler.scheduleWithFixedDelay(this::tryInstallUpdate, 30, 30, TimeUnit.SECONDS);
+    }
+
+    private void tryInstallUpdate() {
+        Version version = pendingUpdate;
+        if (version == null || shuttingDown.get()) {
+            return;
+        }
+        int running = processes.runningCount();
+        if (running > 0) {
+            if (!announcedWait) {
+                announcedWait = true;
+                LOGGER.info("SiriusCloud {} is ready to install. This wrapper restarts once it runs no servers"
+                        + " ({} running), or restart it yourself.", version, running);
+            }
+            return;
+        }
+        LOGGER.info("Restarting to install SiriusCloud {}", version);
+        exitCode = UpdateService.RESTART_EXIT_CODE;
+        updates.close();
+        Thread.ofPlatform().name("sirius-restart").start(() -> System.exit(UpdateService.RESTART_EXIT_CODE));
     }
 
     /**

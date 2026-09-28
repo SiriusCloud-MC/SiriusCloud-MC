@@ -1,0 +1,55 @@
+# Publishes a release when a version tag is pushed:
+#
+#   git tag v1.0.4 && git push origin v1.0.4
+#
+# The release holds every jar on its own, SHA256SUMS, and the whole dist as a
+# zip. Nodes and wrappers update from exactly these: they only install a
+# release that has SHA256SUMS and their own jar, and verify every file.
+name: Release
+
+on:
+  push:
+    tags: ["v*.*.*"]
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Both JDKs: 21 runs Gradle and builds most modules, 25 builds the
+      # Velocity plugin. The last one listed becomes the default.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: |
+            25
+            21
+
+      - uses: gradle/actions/setup-gradle@v4
+
+      - name: Build and test
+        run: >
+          ./gradlew dist test
+          -PreleaseVersion="${GITHUB_REF_NAME#v}"
+          -Porg.gradle.java.installations.fromEnv=JAVA_HOME_21_X64,JAVA_HOME_25_X64
+
+      - name: Collect release files
+        run: |
+          mkdir release
+          find build/dist -name '*.jar' -exec cp {} release/ \;
+          (cd build && cp -r dist "SiriusCloud-${GITHUB_REF_NAME#v}" \
+            && zip -qr "../release/SiriusCloud-${GITHUB_REF_NAME#v}.zip" "SiriusCloud-${GITHUB_REF_NAME#v}")
+          (cd release && sha256sum * > SHA256SUMS)
+          ls -l release
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create "$GITHUB_REF_NAME" release/*
+          --title "SiriusCloud ${GITHUB_REF_NAME#v}"
+          --generate-notes

@@ -84,6 +84,16 @@ public final class NodeConfig {
     /** Persistent storage; see {@link DatabaseSettings}. */
     private DatabaseSettings database = new DatabaseSettings();
 
+    /** Automatic updates; see {@link dev.sirius.cloud.driver.update.UpdateSettings}. */
+    private dev.sirius.cloud.driver.update.UpdateSettings updates = new dev.sirius.cloud.driver.update.UpdateSettings();
+
+    public dev.sirius.cloud.driver.update.UpdateSettings updates() {
+        if (updates == null) {
+            updates = new dev.sirius.cloud.driver.update.UpdateSettings();
+        }
+        return updates;
+    }
+
     /** Running several nodes as one; see {@link ClusterSettings}. */
     private ClusterSettings cluster = new ClusterSettings();
 

@@ -67,6 +67,12 @@ import dev.sirius.cloud.protocol.connection.NetworkServer;
 import dev.sirius.cloud.protocol.packet.PacketRegistry;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.node.cluster.ClusterMember;
+import dev.sirius.cloud.node.command.commands.UpdateCommand;
+import dev.sirius.cloud.driver.update.UpdateService;
+import dev.sirius.cloud.driver.update.UpdateSettings;
+import dev.sirius.cloud.driver.update.Updater;
+import dev.sirius.cloud.driver.update.Version;
+import java.util.Optional;
 import dev.sirius.cloud.protocol.packet.impl.ServiceAvailabilityPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceUpdatePacket;
 import dev.sirius.cloud.protocol.packet.impl.TemplateChangedPacket;
@@ -125,8 +131,8 @@ public final class CloudNode {
 
     private final AtomicBoolean shuttingDown = new AtomicBoolean();
 
-    /** Exit code asking the start scripts to start the node again, as a follower. */
-    public static final int RESTART_AS_FOLLOWER = 75;
+    /** Exit code asking the start scripts to start the node again: as a follower, or on a new version. */
+    public static final int RESTART_AS_FOLLOWER = UpdateService.RESTART_EXIT_CODE;
 
     private volatile ClusterMember cluster;
     private NetworkServer standby;
@@ -201,6 +207,7 @@ public final class CloudNode {
         }
 
         Runtime.getRuntime().addShutdownHook(new Thread(this::shutdown, "sirius-shutdown"));
+        startUpdates();
 
         if (config.cluster().enabled()) {
             // A follower runs no control plane: it keeps a copy of the data,
@@ -222,6 +229,7 @@ public final class CloudNode {
                     stepDown(reason);
                 }
             });
+            cluster.build(BUILD);
             startStandbyGateway();
             cluster.start();
         } else {
@@ -437,17 +445,156 @@ public final class CloudNode {
         if (cluster != null) {
             cluster.close();
         }
+        exitForRestart();
+    }
+
+    /** What the process should exit with once {@link #start()} returns. */
+    public int exitCode() {
+        return exitCode;
+    }
+
+    // ------------------------------------------------------------- updates
+
+    /** This build's version, from the jar manifest; null when run outside a built jar. */
+    private static final String BUILD = CloudNode.class.getPackage().getImplementationVersion();
+
+    private UpdateService updates;
+    private volatile Version pendingUpdate;
+    private volatile long updateNotBefore;
+    private volatile String updateWaitingFor = "";
+    private final ScheduledExecutorService updateTimer = Executors.newSingleThreadScheduledExecutor(runnable -> {
+        Thread thread = new Thread(runnable, "sirius-update-install");
+        thread.setDaemon(true);
+        return thread;
+    });
+
+    /**
+     * Checks for new releases and installs them by restarting - which a node
+     * can do at any time, because services keep running while it is away and
+     * their wrappers reconnect to it. In a cluster, one node at a time and
+     * followers before the leader.
+     */
+    private void startUpdates() {
+        Optional<Version> current = Version.parse(BUILD);
+        if (current.isEmpty()) {
+            LOGGER.debug("Not a released build; automatic updates are off");
+            return;
+        }
+        Updater updater = new Updater(workingDirectory, current.get(), config.updates(), new Updater.Layout() {
+            @Override
+            public String mainAsset() {
+                return "cloud-node.jar";
+            }
+
+            @Override
+            public Optional<String> target(String asset) {
+                if (asset.equals("cloud-node.jar")) {
+                    return Optional.of(asset);
+                }
+                // Only modules that are installed: deleting one is how it is
+                // turned off, and an update must not quietly turn it back on.
+                if (asset.startsWith("cloud-module-") && asset.endsWith(".jar")
+                        && Files.exists(workingDirectory.resolve("modules").resolve(asset))) {
+                    return Optional.of("modules/" + asset);
+                }
+                return Optional.empty();
+            }
+        });
+        updates = new UpdateService(updater, config.updates(), version -> {
+            if (config.updates().mode() == UpdateSettings.Mode.AUTO && UpdateService.hasLauncher()) {
+                pendingUpdate = version;
+            }
+        });
+        commands.register(new UpdateCommand(updates, this::installUpdateNow));
+        updates.start();
+        updateTimer.scheduleWithFixedDelay(this::tryInstallUpdate, 30, 30, TimeUnit.SECONDS);
+    }
+
+    /** Restarts into a staged update once doing so cannot cost the network anything. */
+    private void tryInstallUpdate() {
+        Version version = pendingUpdate;
+        if (version == null || shuttingDown.get()) {
+            return;
+        }
+        ClusterMember member = cluster;
+        if (member == null) {
+            restartForUpdate(version);
+            return;
+        }
+        ClusterMember.Status status = member.status();
+        if (!status.members().stream().allMatch(ClusterMember.MemberStatus::connected)) {
+            waitingForUpdate("every cluster member to be reachable");
+            return;
+        }
+        if (member.isLeader()) {
+            // Followers first: once they run the new version, one of them
+            // takes over, and the next leader is always an updated node.
+            boolean followersUpdated = member.peerBuilds().size() >= status.members().size() - 1
+                    && member.peerBuilds().values().stream()
+                    .allMatch(build -> Version.parse(build).map(peer -> peer.compareTo(version) >= 0).orElse(false));
+            if (!followersUpdated) {
+                waitingForUpdate("the followers to update first");
+                return;
+            }
+        } else {
+            // Spread out, so two followers do not restart at the same moment.
+            if (updateNotBefore == 0) {
+                updateNotBefore = System.currentTimeMillis() + java.util.concurrent.ThreadLocalRandom.current()
+                        .nextLong(0, 180_000);
+            }
+            if (System.currentTimeMillis() < updateNotBefore) {
+                return;
+            }
+        }
+        restartForUpdate(version);
+    }
+
+    private void waitingForUpdate(String what) {
+        if (!what.equals(updateWaitingFor)) {
+            updateWaitingFor = what;
+            LOGGER.info("SiriusCloud {} is ready to install; waiting for {}", pendingUpdate, what);
+        }
+    }
+
+    /** For 'update now': download if needed, then restart straight away. */
+    private String installUpdateNow() {
+        if (!UpdateService.hasLauncher()) {
+            return "This node was not started with the start scripts, which are what install updates.";
+        }
+        String result = updates.check();
+        Optional<Version> staged = updates.staged();
+        if (staged.isEmpty()) {
+            return result;
+        }
+        Thread.ofPlatform().name("sirius-update-now").start(() -> restartForUpdate(staged.get()));
+        return "Restarting to install " + staged.get() + ". Services keep running.";
+    }
+
+    private void restartForUpdate(Version version) {
+        if (!shuttingDown.compareAndSet(false, true)) {
+            return;
+        }
+        LOGGER.info("Restarting to install SiriusCloud {}. Services keep running.", version);
+        haltControlPlane();
+        if (cluster != null) {
+            cluster.handOver();
+            cluster.close();
+        }
+        exitForRestart();
+    }
+
+    /** Closes what is left and exits with the code that makes the start scripts start this node again. */
+    private void exitForRestart() {
+        if (updates != null) {
+            updates.close();
+        }
+        updateTimer.shutdownNow();
         if (console != null) {
             console.close();
         }
         directoryLock.close();
         exitCode = RESTART_AS_FOLLOWER;
         Thread.ofPlatform().name("sirius-restart").start(() -> System.exit(RESTART_AS_FOLLOWER));
-    }
-
-    /** What the process should exit with once {@link #start()} returns. */
-    public int exitCode() {
-        return exitCode;
     }
 
     /** Stops acting as the control plane, leaving every service running. */

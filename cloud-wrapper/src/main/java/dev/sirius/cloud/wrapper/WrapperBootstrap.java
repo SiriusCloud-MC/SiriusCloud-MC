@@ -10,8 +10,11 @@ public final class WrapperBootstrap {
     public static void main(String[] args) {
         Path workingDirectory = Path.of(args.length > 0 ? args[0] : "").toAbsolutePath().normalize();
 
+        int exitCode = 0;
         try {
-            new CloudWrapper(workingDirectory).start();
+            CloudWrapper wrapper = new CloudWrapper(workingDirectory);
+            wrapper.start();
+            exitCode = wrapper.exitCode();
         } catch (java.nio.channels.OverlappingFileLockException | java.io.IOException exception) {
             // Almost always "already running here" - a stack trace would bury
             // a message the operator can act on directly.
@@ -21,7 +24,7 @@ public final class WrapperBootstrap {
             CloudLogger.of("Bootstrap").error("The wrapper failed to start", exception);
             System.exit(1);
         }
-        System.exit(0);
+        System.exit(exitCode);
     }
 
     private WrapperBootstrap() {

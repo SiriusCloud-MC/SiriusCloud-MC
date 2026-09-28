@@ -89,6 +89,9 @@ public final class ClusterMember {
     private final Map<String, Long> lastContact = new ConcurrentHashMap<>();
     /** Each peer's replicated revision, as it last reported it. */
     private final Map<String, Long> peerRevisions = new ConcurrentHashMap<>();
+    /** Each peer's SiriusCloud version, as it last reported it. Leader only. */
+    private final Map<String, String> peerBuilds = new ConcurrentHashMap<>();
+    private volatile String build = "";
 
     private final Election election;
     private final Replicator replicator;
@@ -226,6 +229,16 @@ public final class ClusterMember {
 
     // ---------------------------------------------------------------- views
 
+    /** This node's SiriusCloud version, which it reports to the leader. */
+    public void build(String version) {
+        this.build = version == null ? "" : version;
+    }
+
+    /** The version each other member last reported. Leader only; used to update followers first. */
+    public Map<String, String> peerBuilds() {
+        return Map.copyOf(peerBuilds);
+    }
+
     public boolean isLeader() {
         return role == Election.Role.LEADER;
     }
@@ -361,10 +374,14 @@ public final class ClusterMember {
                 reply.addProperty("term", election.term());
                 reply.addProperty("accepted", accepted);
                 reply.addProperty("revision", replicator.revision());
+                reply.addProperty("build", build);
                 replyVia.send(new ClusterPacket("heartbeat-reply", reply.toString()));
             }
             case "heartbeat-reply" -> {
                 peerRevisions.put(from, body.get("revision").getAsLong());
+                if (body.has("build")) {
+                    peerBuilds.put(from, body.get("build").getAsString());
+                }
                 election.onHeartbeatReply(from, body.get("term").getAsLong(), body.get("accepted").getAsBoolean(),
                         now);
             }

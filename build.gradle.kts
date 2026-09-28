@@ -5,7 +5,9 @@ plugins {
 
 allprojects {
     group = "dev.sirius.cloud"
-    version = "1.0.0-SNAPSHOT"
+    // Releases pass -PreleaseVersion=1.2.3 (the release workflow takes it from
+    // the tag). It is what the jars report, and what the updater compares.
+    version = (findProperty("releaseVersion") as String?)?.removePrefix("v") ?: "1.0.0-SNAPSHOT"
 }
 
 subprojects {

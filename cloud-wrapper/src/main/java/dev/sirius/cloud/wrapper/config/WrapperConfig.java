@@ -59,6 +59,16 @@ public final class WrapperConfig {
     /** How services are run; see {@link Isolation}. */
     private Isolation isolation = new Isolation();
 
+    /** Automatic updates; see {@link dev.sirius.cloud.driver.update.UpdateSettings}. */
+    private dev.sirius.cloud.driver.update.UpdateSettings updates = new dev.sirius.cloud.driver.update.UpdateSettings();
+
+    public dev.sirius.cloud.driver.update.UpdateSettings updates() {
+        if (updates == null) {
+            updates = new dev.sirius.cloud.driver.update.UpdateSettings();
+        }
+        return updates;
+    }
+
     /**
      * Running services in containers.
      *
