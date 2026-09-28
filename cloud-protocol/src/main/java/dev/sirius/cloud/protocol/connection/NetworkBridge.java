@@ -51,7 +51,11 @@ final class NetworkBridge extends SimpleChannelInboundHandler<Packet> {
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-        if (cause instanceof IOException) {
+        if (cause instanceof io.netty.handler.timeout.ReadTimeoutException) {
+            // The other side went quiet: gone without closing, or a network
+            // in between dropped the connection. It reconnects on its own.
+            LOGGER.warn("No traffic from {} for too long; closing the connection", networkChannel);
+        } else if (cause instanceof IOException) {
             // Peer went away mid-write. Normal during shutdown; not worth a stacktrace.
             LOGGER.debug("Connection error on {}: {}", networkChannel, cause.getMessage());
         } else {

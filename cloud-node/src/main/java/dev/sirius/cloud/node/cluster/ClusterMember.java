@@ -151,6 +151,16 @@ public final class ClusterMember {
             publish();
         }), 100, 100, TimeUnit.MILLISECONDS);
 
+        // Replies travel back on the connection a request came in on, so the
+        // connection a follower dialled can carry nothing for a long time.
+        // Without traffic the other end's read timeout closes it, and it is
+        // dialled again, over and over. A small keep-alive prevents that.
+        electionLane.scheduleWithFixedDelay(() -> guard(() -> outbound.values().forEach(channel -> {
+            if (channel.isOpen()) {
+                channel.send(new ClusterPacket("ping", "{}"));
+            }
+        })), 5, 5, TimeUnit.SECONDS);
+
         replicationLane.scheduleWithFixedDelay(() -> guard(() -> {
             if (role == Election.Role.LEADER) {
                 replicator.leaderTick(connectedPeers(), System.currentTimeMillis());
@@ -361,6 +371,9 @@ public final class ClusterMember {
                     }
                 }
             });
+            case "ping" -> {
+                // Keep-alive only; receiving it was the point.
+            }
             default -> LOGGER.debug("Unknown cluster message '{}' from {}", packet.kind(), from);
         }
     }
