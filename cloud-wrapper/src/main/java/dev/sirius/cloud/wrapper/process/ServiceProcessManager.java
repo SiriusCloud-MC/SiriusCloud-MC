@@ -121,6 +121,13 @@ public final class ServiceProcessManager {
      * called from a Netty event loop that must not be held up.
      */
     private volatile java.util.function.Supplier<List<String>> nodeEndpoints = List::of;
+    private volatile Runnable beforeStart = () -> {
+    };
+
+    /** Runs before a service's templates are copied; used to let template downloads finish. */
+    public void beforeStart(Runnable beforeStart) {
+        this.beforeStart = beforeStart;
+    }
 
     /** Where to learn every node's address, for services to fail over between. */
     public void nodeEndpoints(java.util.function.Supplier<List<String>> endpoints) {
@@ -137,6 +144,9 @@ public final class ServiceProcessManager {
                 String java = javaFor(group);
                 requirePortFree(info);
 
+                // A template download in progress finishes first, so a server
+                // started right after a change never gets half the old files.
+                beforeStart.run();
                 templates.prepare(group);
 
                 boolean proxy = group.type() == ServiceType.PROXY;

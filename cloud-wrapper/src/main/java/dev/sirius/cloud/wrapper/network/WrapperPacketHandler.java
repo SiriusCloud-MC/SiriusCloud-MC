@@ -33,6 +33,14 @@ public final class WrapperPacketHandler implements PacketHandler {
     /** Handed backup requests; set by the wrapper, which owns the backup manager. */
     private volatile java.util.function.Consumer<BackupRequestPacket> backups = request -> { };
 
+    private volatile java.util.function.Consumer<dev.sirius.cloud.protocol.packet.impl.TemplateSyncPacket>
+            templateSync = packet -> { };
+
+    public void onTemplateSync(
+            java.util.function.Consumer<dev.sirius.cloud.protocol.packet.impl.TemplateSyncPacket> templateSync) {
+        this.templateSync = templateSync;
+    }
+
     public void onBackupRequest(java.util.function.Consumer<BackupRequestPacket> backups) {
         this.backups = backups;
     }
@@ -104,6 +112,9 @@ public final class WrapperPacketHandler implements PacketHandler {
 
         } else if (packet instanceof BackupRequestPacket backup) {
             backups.accept(backup);
+
+        } else if (packet instanceof dev.sirius.cloud.protocol.packet.impl.TemplateSyncPacket sync) {
+            templateSync.accept(sync);
 
         } else if (packet instanceof ConsoleSubscribePacket subscribe) {
             processes.setConsoleSubscribed(subscribe.serviceId(), subscribe.subscribe());

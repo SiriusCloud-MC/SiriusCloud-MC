@@ -156,6 +156,17 @@ class ReplicatorTest {
     }
 
     @Test
+    void templatesTravelWithTheirPlugins() throws IOException {
+        write(leaderDir, "templates/Lobby/default/plugins/cloud-plugin-lobby.jar", "the lobby plugin");
+        write(leaderDir, "templates/global/server/server.properties", "motd=hi");
+        setUp();
+
+        tick();
+        assertEquals("the lobby plugin", read("templates/Lobby/default/plugins/cloud-plugin-lobby.jar"));
+        assertEquals("motd=hi", read("templates/global/server/server.properties"));
+    }
+
+    @Test
     void largeFilesArriveInPieces() throws IOException {
         String big = "x".repeat(Replicator.CHUNK * 2 + 17);
         write(leaderDir, "local/database/players/abc.json", big);
@@ -198,6 +209,8 @@ class ReplicatorTest {
         assertFalse(FileIndex.replicated("groups/../config.json"));
         assertFalse(FileIndex.replicated("groups/Lobby.json.tmp"));
         assertTrue(FileIndex.replicated("groups/Lobby.json"));
+        assertTrue(FileIndex.replicated("templates/Lobby/default/plugins/x.jar"));
+        assertFalse(FileIndex.replicated("modules/cloud-module-rest.jar"));
         assertTrue(FileIndex.replicated("local/store.json"));
     }
 }

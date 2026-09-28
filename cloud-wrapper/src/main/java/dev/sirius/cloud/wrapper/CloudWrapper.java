@@ -41,6 +41,7 @@ import dev.sirius.cloud.wrapper.process.ServiceProcessManager;
 import dev.sirius.cloud.wrapper.setup.Prompter;
 import dev.sirius.cloud.wrapper.setup.WrapperSetup;
 import dev.sirius.cloud.wrapper.template.TemplateManager;
+import dev.sirius.cloud.wrapper.template.TemplateSync;
 import dev.sirius.cloud.wrapper.template.TemplateWatcher;
 
 import java.io.IOException;
@@ -91,6 +92,7 @@ public final class CloudWrapper {
 
     private final DirectoryLock directoryLock;
     private TemplateWatcher templateWatcher;
+    private TemplateSync templateSync;
 
     private final CountDownLatch shutdownLatch = new CountDownLatch(1);
     private final AtomicBoolean shuttingDown = new AtomicBoolean();
@@ -172,8 +174,15 @@ public final class CloudWrapper {
             docker.removeLeftovers();
         }
 
-        templateWatcher = new TemplateWatcher(workingDirectory.resolve("local").resolve("templates"),
+        // Templates are shared through the node: changes made here go out to
+        // every other wrapper, and theirs come in. A group is rolled over when
+        // this wrapper changed it; the watcher only says that something moved.
+        Path templatesDirectory = workingDirectory.resolve("local").resolve("templates");
+        templateSync = new TemplateSync(templatesDirectory,
+                workingDirectory.resolve("local").resolve("template-sync.json"), client::send,
                 group -> client.send(new TemplateChangedPacket(group)));
+        processes.beforeStart(() -> templateSync.awaitQuiet(60_000));
+        templateWatcher = new TemplateWatcher(templatesDirectory, group -> templateSync.localChanged());
         templateWatcher.start();
 
         if (config.serviceBindAddress().isBlank()) {
@@ -189,7 +198,13 @@ public final class CloudWrapper {
 
         WrapperPacketHandler handler = new WrapperPacketHandler(
                 config, processes, connected -> {
+                    if (connected) {
+                        templateSync.connected();
+                    } else {
+                        templateSync.disconnected();
+                    }
                 }, this::onAuthenticationRejected);
+        handler.onTemplateSync(templateSync::onPacket);
 
         BackupManager backups = new BackupManager(
                 workingDirectory.resolve("local").resolve("backups"), processes, client::send);
@@ -394,6 +409,9 @@ public final class CloudWrapper {
         // the node still sees the STOPPED updates rather than inferring crashes.
         processes.stopAll();
 
+        if (templateSync != null) {
+            templateSync.close();
+        }
         if (templateWatcher != null) {
             templateWatcher.close();
         }

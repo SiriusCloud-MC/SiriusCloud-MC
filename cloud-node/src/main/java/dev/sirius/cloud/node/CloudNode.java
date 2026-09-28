@@ -67,6 +67,7 @@ import dev.sirius.cloud.protocol.connection.NetworkServer;
 import dev.sirius.cloud.protocol.packet.PacketRegistry;
 import dev.sirius.cloud.protocol.packet.impl.HandshakeResponsePacket;
 import dev.sirius.cloud.node.cluster.ClusterMember;
+import dev.sirius.cloud.node.template.TemplateHub;
 import dev.sirius.cloud.node.command.commands.UpdateCommand;
 import dev.sirius.cloud.driver.update.UpdateService;
 import dev.sirius.cloud.driver.update.UpdateSettings;
@@ -135,6 +136,7 @@ public final class CloudNode {
     public static final int RESTART_AS_FOLLOWER = UpdateService.RESTART_EXIT_CODE;
 
     private volatile ClusterMember cluster;
+    private TemplateHub templates;
     private NetworkServer standby;
     private volatile boolean leading;
     private volatile int exitCode;
@@ -355,6 +357,11 @@ public final class CloudNode {
                 config, serviceManager, services, groups, wrappers, events, console,
                 serviceChannels, players, playerManager, driver);
         packetHandler.onTemplateChanged(this::templateChanged);
+
+        // One copy of every template, which wrappers keep theirs in step with.
+        templates = new TemplateHub(workingDirectory.resolve("templates"), wrappers, this::templateChanged);
+        templates.start();
+        packetHandler.onTemplateSync(templates::onPacket);
         driver.cluster(() -> cluster);
         if (cluster != null) {
             // Every client learns every node, so it can find the next leader.
@@ -601,6 +608,9 @@ public final class CloudNode {
     private void haltControlPlane() {
         leading = false;
         scheduler.shutdownNow();
+        if (templates != null) {
+            templates.close();
+        }
         stopStandbyGateway();
         if (modules != null) {
             modules.disableAll();

@@ -460,8 +460,8 @@ other really is down: if it is only cut off, both would be running services.
 
 ### What is replicated
 
-`groups/`, every module's folder in `modules/`, `local/database/`,
-`local/store.json` and the data version. Also the settings that describe the
+`groups/`, `templates/` (plugins included), every module's folder in
+`modules/`, `local/database/`, `local/store.json` and the data version. Also the settings that describe the
 network rather than one machine: the secrets, the memory budget, the database
 settings and the member list. A change reaches the followers about a second
 after it is saved; the key-value store saves every 5 seconds.
@@ -699,6 +699,23 @@ wrapper/local/templates/Lobby/default/     → every Lobby service
 
 They are copied into a fresh working directory on each start. Dynamic services
 have that directory deleted on stop; static services keep theirs.
+
+### Shared between machines
+
+Templates are the same on every wrapper. Edit one on whichever machine is
+handy, and about ten seconds after the last file stops changing that wrapper
+sends the change to the node, which keeps it in `node/templates/` and passes
+it on to every other wrapper. The group is then rolled over as usual. Files
+can also be put into `node/templates/` directly, and reach every wrapper
+within a few seconds. In a cluster, `node/templates/` is replicated to every
+node like the rest of the network's data.
+
+| | |
+|---|---|
+| **A wrapper that was offline** | Remembers what it last had in common with the network (`local/template-sync.json`), so on reconnecting it sends what changed on its side and fetches what changed elsewhere. |
+| **The same file changed on both sides** | The network's copy wins. This machine's copy is kept in `wrapper/local/template-conflicts/`, and the log says so. |
+| **Starting a server** | Waits for template downloads in progress, so it never gets half an old template. |
+| **The first wrapper to connect** | Fills the node with its templates. Wrappers after it keep what they have where the network has nothing, and take the network's version of anything both have. |
 
 Server jars are downloaded from PaperMC and cached in
 `wrapper/local/jars/cache/`. Dropping a `paper.jar` into `wrapper/local/jars/`
@@ -1392,7 +1409,7 @@ registered under its id.
 | **1: Skeleton** ✅ | Node, wrapper, protocol, Paper plugin, provisioning, attach console |
 | **2: Proxy** ✅ | Velocity plugin, dynamic registration, `/hub`, modern forwarding |
 | **3: Player layer** ✅ | Registry, transfers, messaging, kicks, restart re-sync |
-| **3b: Node-side templates** | Template storage on the node, pushed to wrappers |
+| **3b: Node-side templates** ✅ | Templates kept on the node and shared by every wrapper, edited anywhere |
 | **4: Modules** | Module loader ✅, REST API ✅, web panel ✅, in-game commands ✅, notifications ✅, LuckPerms ✅, permissions ✅ · sign walls, NPCs |
 | **4b: Operations** ✅ | Autoscaling, rolling restarts and rollouts, start timeouts, health metrics, backups, Purpur/Folia/Fabric, Docker isolation |
 | **4c: Network** ✅ | Databases, player profiles, key-value store, maintenance and display, parties, friends, messages, bans and mutes, matchmaking, Prometheus, Discord |

@@ -41,6 +41,7 @@ import dev.sirius.cloud.protocol.packet.impl.BackupResultPacket;
 import dev.sirius.cloud.protocol.packet.impl.PortUnavailablePacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceMetricsPacket;
 import dev.sirius.cloud.protocol.packet.impl.TemplateChangedPacket;
+import dev.sirius.cloud.protocol.packet.impl.TemplateSyncPacket;
 import dev.sirius.cloud.protocol.packet.impl.ChatRestrictionRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.LoginCheckPacket;
 import dev.sirius.cloud.protocol.packet.impl.NetworkCommandPacket;
@@ -354,6 +355,11 @@ public final class NodePacketHandler implements PacketHandler {
         } else if (packet instanceof TemplateChangedPacket changed) {
             templateChanged.accept(changed.groupName());
 
+        } else if (packet instanceof TemplateSyncPacket sync) {
+            if (channel.type() == ConnectionType.WRAPPER) {
+                wrappers.byChannel(channel).ifPresent(wrapper -> templateSync.accept(wrapper, sync));
+            }
+
         } else if (packet instanceof ChannelSubscriptionsPacket subscribe) {
             if (channel.serviceId() != null) {
                 serviceChannels.subscriptions(channel.serviceId(), subscribe.channels());
@@ -487,6 +493,16 @@ public final class NodePacketHandler implements PacketHandler {
                             java.util.function.Supplier<List<String>> endpoints) {
         this.clusterTerm = term;
         this.clusterEndpoints = endpoints;
+    }
+
+    private java.util.function.BiConsumer<dev.sirius.cloud.node.wrapper.ConnectedWrapper, TemplateSyncPacket>
+            templateSync = (wrapper, packet) -> {
+            };
+
+    /** Where wrappers' template traffic goes: the node's shared copy of the templates. */
+    public void onTemplateSync(java.util.function.BiConsumer<dev.sirius.cloud.node.wrapper.ConnectedWrapper,
+            TemplateSyncPacket> handler) {
+        this.templateSync = handler;
     }
 
     private void handleHandshake(NetworkChannel channel, HandshakePacket handshake) {

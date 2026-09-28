@@ -7,6 +7,7 @@ import dev.sirius.cloud.protocol.packet.impl.BackupResultPacket;
 import dev.sirius.cloud.protocol.packet.impl.BackupRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.ServiceMetricsPacket;
 import dev.sirius.cloud.protocol.packet.impl.TemplateChangedPacket;
+import dev.sirius.cloud.protocol.packet.impl.TemplateSyncPacket;
 import dev.sirius.cloud.protocol.packet.impl.PortUnavailablePacket;
 import dev.sirius.cloud.protocol.packet.impl.ChatRestrictionRequestPacket;
 import dev.sirius.cloud.protocol.packet.impl.ChatRestrictionsPacket;
@@ -139,6 +140,8 @@ public final class PacketRegistry {
                 .register(0x29, TemplateChangedPacket.class, TemplateChangedPacket::new)
                 .register(0x2A, ServiceMetricsPacket.class, ServiceMetricsPacket::new)
                 .register(0x2B, BackupResultPacket.class, BackupResultPacket::new)
+                // Both directions: templates kept the same on every wrapper.
+                .register(0x2C, TemplateSyncPacket.class, TemplateSyncPacket::new)
 
                 // 0x30-0x3F — driver queries
                 .register(0x30, ServiceListRequestPacket.class, ServiceListRequestPacket::new)
