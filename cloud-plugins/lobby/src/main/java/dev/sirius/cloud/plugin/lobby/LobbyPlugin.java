@@ -4,6 +4,8 @@ import dev.sirius.cloud.api.driver.CloudDriver;
 import dev.sirius.cloud.api.service.ServiceInfo;
 import dev.sirius.cloud.plugin.lobby.menu.Menu;
 import dev.sirius.cloud.plugin.lobby.menu.MenuListener;
+import dev.sirius.cloud.plugin.lobby.world.GameNpcs;
+import dev.sirius.cloud.plugin.lobby.world.ServerSigns;
 import net.kyori.adventure.title.Title;
 import org.bukkit.Bukkit;
 import org.bukkit.GameMode;
@@ -45,6 +47,8 @@ public final class LobbyPlugin extends JavaPlugin implements Listener {
     private Visibility visibility;
     private Sidebar sidebar;
     private MovementListener movement;
+    private ServerSigns signs;
+    private GameNpcs npcs;
 
     @Override
     public void onEnable() {
@@ -66,12 +70,32 @@ public final class LobbyPlugin extends JavaPlugin implements Listener {
         manager.registerEvents(new ProtectionListener(this), this);
         manager.registerEvents(movement, this);
 
+        // Signs and NPCs live in the cloud's database, shared by every lobby
+        // server; the first load waits a moment for the connection to the node.
+        signs = new ServerSigns(this);
+        npcs = new GameNpcs(this);
+        manager.registerEvents(signs, this);
+        manager.registerEvents(npcs, this);
+        var npcCommand = getCommand("cloudnpc");
+        if (npcCommand != null) {
+            npcCommand.setExecutor(npcs);
+            npcCommand.setTabCompleter(npcs);
+        }
+        Bukkit.getScheduler().runTaskTimer(this, () -> {
+            signs.reload();
+            npcs.reload();
+        }, 100L, 20L * 15);
+
         applyWorldRules();
         network.refresh();
 
         // The network view is one shared refresh; menus and the sidebar only read it.
         Bukkit.getScheduler().runTaskTimer(this, network::refresh, 40L, 40L);
-        Bukkit.getScheduler().runTaskTimer(this, sidebar::tick, 40L, 40L);
+        Bukkit.getScheduler().runTaskTimer(this, () -> {
+            sidebar.tick();
+            signs.render();
+            npcs.tick();
+        }, 40L, 40L);
         Bukkit.getScheduler().runTaskTimer(this, this::refreshOpenMenus, 20L, 20L);
 
         // A reload with players online: set them up as if they had just joined.
@@ -83,6 +107,9 @@ public final class LobbyPlugin extends JavaPlugin implements Listener {
     public void onDisable() {
         if (sidebar != null) {
             sidebar.hideAll();
+        }
+        if (npcs != null) {
+            npcs.despawnAll();
         }
     }
 
@@ -306,6 +333,52 @@ public final class LobbyPlugin extends JavaPlugin implements Listener {
         }
         return CloudDriver.instance().services().self().map(ServiceInfo::groupName)
                 .orElseGet(() -> connectionFile("groupName", "Lobby"));
+    }
+
+    /**
+     * Sends a player to a game: through the matchmaking queue, which keeps a
+     * party together and starts a server when none has room, or straight to
+     * the least busy server. Used by the game menu, signs and NPCs alike.
+     */
+    public void joinGame(Player player, String game, boolean queue) {
+        Map<String, Object> values = Map.of("game", game);
+        switch (network.game(game).status()) {
+            case MAINTENANCE -> {
+                message(player, "maintenance", values);
+                return;
+            }
+            case OFFLINE -> {
+                message(player, "offline", values);
+                return;
+            }
+            default -> {
+            }
+        }
+        CloudDriver driver = CloudDriver.instance();
+        if (queue) {
+            com.google.gson.JsonObject request = new com.google.gson.JsonObject();
+            request.addProperty("player", player.getUniqueId().toString());
+            request.addProperty("game", game);
+            message(player, "queued", values);
+            driver.messaging().publishTo(dev.sirius.cloud.api.messaging.MessagingProvider.NODE, "matchmaking:queue",
+                    request.toString()).exceptionally(error -> failed(player, error));
+        } else {
+            message(player, "connecting", Map.of("server", game));
+            driver.players().connectToGroup(player.getUniqueId(), game).exceptionally(error -> failed(player, error));
+        }
+    }
+
+    /** Sends a player to one particular server, as a sign does. */
+    public void joinServer(Player player, String server) {
+        message(player, "connecting", Map.of("server", server));
+        CloudDriver.instance().players().connect(player.getUniqueId(), server)
+                .exceptionally(error -> failed(player, error));
+    }
+
+    private Void failed(Player player, Throwable error) {
+        Throwable cause = error.getCause() != null ? error.getCause() : error;
+        message(player, "failed", Map.of("reason", String.valueOf(cause.getMessage())));
+        return null;
     }
 
     public void message(Player player, String key, Map<String, ?> values) {

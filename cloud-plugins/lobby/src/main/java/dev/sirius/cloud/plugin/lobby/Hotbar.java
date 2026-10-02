@@ -88,7 +88,9 @@ public final class Hotbar implements Listener {
 
     @EventHandler
     public void onUse(PlayerInteractEvent event) {
-        if (event.getHand() != EquipmentSlot.HAND || event.getAction() == Action.PHYSICAL) {
+        if (event.getHand() != EquipmentSlot.HAND || event.getAction() == Action.PHYSICAL
+                || event.useItemInHand() == org.bukkit.event.Event.Result.DENY) {
+            // DENY: a server sign took the click.
             return;
         }
         String id = id(event.getItem());

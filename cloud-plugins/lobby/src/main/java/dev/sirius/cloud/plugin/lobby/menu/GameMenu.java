@@ -1,8 +1,5 @@
 package dev.sirius.cloud.plugin.lobby.menu;
 
-import com.google.gson.JsonObject;
-import dev.sirius.cloud.api.driver.CloudDriver;
-import dev.sirius.cloud.api.messaging.MessagingProvider;
 import dev.sirius.cloud.plugin.lobby.LobbyPlugin;
 import dev.sirius.cloud.plugin.lobby.NetworkView;
 import dev.sirius.cloud.plugin.lobby.Text;
@@ -99,39 +96,10 @@ public final class GameMenu extends Menu {
     }
 
     private void play(Player player, Entry entry, NetworkView.Game game) {
-        Map<String, Object> values = Map.of("game", entry.group());
-        switch (game.status()) {
-            case MAINTENANCE -> {
-                plugin.message(player, "maintenance", values);
-                return;
-            }
-            case OFFLINE -> {
-                plugin.message(player, "offline", values);
-                return;
-            }
-            default -> {
-            }
+        if (game.status() != NetworkView.Status.MAINTENANCE && game.status() != NetworkView.Status.OFFLINE) {
+            player.closeInventory();
         }
-        player.closeInventory();
-        CloudDriver driver = CloudDriver.instance();
-        if (entry.queue()) {
-            JsonObject request = new JsonObject();
-            request.addProperty("player", player.getUniqueId().toString());
-            request.addProperty("game", entry.group());
-            plugin.message(player, "queued", values);
-            driver.messaging().publishTo(MessagingProvider.NODE, "matchmaking:queue", request.toString())
-                    .exceptionally(error -> failed(player, error));
-        } else {
-            plugin.message(player, "connecting", Map.of("server", entry.group()));
-            driver.players().connectToGroup(player.getUniqueId(), entry.group())
-                    .exceptionally(error -> failed(player, error));
-        }
-    }
-
-    private Void failed(Player player, Throwable error) {
-        Throwable cause = error.getCause() != null ? error.getCause() : error;
-        plugin.message(player, "failed", Map.of("reason", String.valueOf(cause.getMessage())));
-        return null;
+        plugin.joinGame(player, entry.group(), entry.queue());
     }
 
     static Material material(String name, Material fallback) {

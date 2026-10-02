@@ -24,10 +24,14 @@ commands:
   lobbyreload:
     description: Reloads the lobby's config.yml.
     permission: siriuscloud.lobby.admin
+  cloudnpc:
+    description: Places and removes NPCs that queue players for a game.
+    permission: siriuscloud.lobby.admin
+    aliases: [lobbynpc]
 
 permissions:
   siriuscloud.lobby.admin:
-    description: /setspawn and /lobbyreload.
+    description: /setspawn, /lobbyreload, /cloudnpc, and creating and removing server signs.
     default: op
   siriuscloud.lobby.build:
     description: /build, to change the lobby.

@@ -1151,6 +1151,7 @@ it shows is live from the network.
 | **Player visibility** (dye) | Hides or shows everyone else. |
 | **Sidebar** | Rank, lobby, players online across the network, and your own lines. Rank prefixes above heads keep working. |
 | **Movement** | Double jump, launch pads, and falling into the void takes you back to spawn. |
+| **Server signs and NPCs** | Live sign walls and game NPCs, placed once for every lobby server. See [below](#server-signs-and-npcs). |
 | **Protection** | No damage, hunger, building, item dropping, weather or mob spawning; a fixed time of day. Each can be turned back on. |
 | **Joining** | Spawn, a clean inventory, a title and a welcome message; no join or quit lines in chat. |
 
@@ -1198,6 +1199,36 @@ its world folder into the template.
 It runs on Paper and Purpur. Queueing needs the matchmaking module on the
 node, which ships enabled; with it turned off, set entries to `connect`.
 
+### Server signs and NPCs
+
+Both are kept in the cloud's database rather than in one server's world, so
+placing one on any lobby server puts it on every server of that lobby group,
+including ones autoscaling starts later.
+
+**Server signs.** Write `[cloud]` on the first line of a sign and a game
+group on the second. The sign then shows one server of that game, live:
+name, players, and whether it is waiting for players, in a round, full or
+starting. Put several next to each other for a sign wall: each takes the
+next server, top row first, and a sign with no server left shows "Waiting
+for a server". Right-click joins the server shown. Sneak and break a sign to
+remove it.
+
+**NPCs.** `/cloudnpc create BedWars` puts an NPC where you stand, facing
+your way, with a live label above it: the game, how many play it, and
+whether it is open. Clicking it, either button, queues for the game like the
+game menu does. `/cloudnpc create BedWars zombie` picks the entity;
+`/cloudnpc remove` takes away the nearest one; `/cloudnpc list` shows them.
+
+| Command | Permission | |
+|---|---|---|
+| `[cloud]` sign, sneak-break | `siriuscloud.lobby.admin` | Create, remove a server sign |
+| `/cloudnpc create <game> [entity]` | `siriuscloud.lobby.admin` | An NPC here |
+| `/cloudnpc remove`, `list` | `siriuscloud.lobby.admin` | |
+
+Both layouts are in `config.yml` under `signs` and `npcs`, in MiniMessage.
+The NPC entities are never saved with the world; each server spawns its own,
+so there are no stale copies after a crash.
+
 ---
 
 ## LuckPerms
@@ -1222,11 +1253,8 @@ Everything about the integration is optional and guarded: on a server without
 LuckPerms the plugin loads exactly as before, and a LuckPerms whose messenger
 API has moved is reported rather than fatal.
 
-> **On the proxy this is weaker than on backends.** Paper has `loadbefore`, so
-> the messenger is registered before LuckPerms enables and is picked up
-> cleanly. Velocity has no equivalent: declaring LuckPerms as a dependency
-> forces this plugin to load *after* it, and declaring nothing leaves the order
-> unspecified. If proxy syncing does not start, run `/lp reloadconfig` once.
+Registration waits for LuckPerms to start, on servers and on proxies alike,
+and LuckPerms switches to the cloud the moment it is registered.
 
 ---
 
@@ -1235,9 +1263,12 @@ API has moved is reported rather than fatal.
 A permission system of the cloud's own, for people who would rather not run
 LuckPerms. The node owns the data; a **separate, opt-in plugin** applies it.
 
-> **Use this or LuckPerms, never both.** Two things attaching permissions to
-> the same players contradict each other, and the symptom is a rank that
-> applies until it does not. The node says so on startup.
+> **With LuckPerms, it only shows ranks.** On a server that also runs
+> LuckPerms, the plugin leaves permissions to LuckPerms entirely and shows
+> LuckPerms' prefixes, suffixes and group weights in chat, above heads and in
+> the tab list instead. `/perms` then points to `/lp`. So with LuckPerms you
+> keep the rank display without a separate chat or tab plugin: install both,
+> and set the format on the node as below.
 
 ### Why the node owns it
 
@@ -1410,7 +1441,7 @@ registered under its id.
 | **2: Proxy** ✅ | Velocity plugin, dynamic registration, `/hub`, modern forwarding |
 | **3: Player layer** ✅ | Registry, transfers, messaging, kicks, restart re-sync |
 | **3b: Node-side templates** ✅ | Templates kept on the node and shared by every wrapper, edited anywhere |
-| **4: Modules** | Module loader ✅, REST API ✅, web panel ✅, in-game commands ✅, notifications ✅, LuckPerms ✅, permissions ✅ · sign walls, NPCs |
+| **4: Modules** ✅ | Module loader, REST API, web panel, in-game commands, notifications, LuckPerms, permissions, lobby, sign walls, NPCs |
 | **4b: Operations** ✅ | Autoscaling, rolling restarts and rollouts, start timeouts, health metrics, backups, Purpur/Folia/Fabric, Docker isolation |
 | **4c: Network** ✅ | Databases, player profiles, key-value store, maintenance and display, parties, friends, messages, bans and mutes, matchmaking, Prometheus, Discord |
 | **5: Scale** ✅ | Node clustering, leader election, state replication, failover |

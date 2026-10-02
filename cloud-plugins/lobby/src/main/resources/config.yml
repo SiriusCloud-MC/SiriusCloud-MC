@@ -75,6 +75,48 @@ sidebar:
   # Shown for {rank} when a player has no prefix.
   no-rank: "<gray>Player"
 
+# Server signs: write [cloud] on the first line and a game group on the
+# second (needs siriuscloud.lobby.admin). Each sign of a wall shows one server
+# of that game; a click joins it. Sneak and break a sign to remove it. Signs
+# are kept in the cloud's database, so every lobby server shows them.
+# {game}, {server}, {players}, {max}, {state}, {map}
+signs:
+  server:
+    - "<dark_gray>[<aqua>{game}<dark_gray>]"
+    - "<black>{server}"
+    - "<dark_gray>{players}/{max}"
+    - "{state}"
+  searching:
+    - "<dark_gray>[<aqua>{game}<dark_gray>]"
+    - ""
+    - "<dark_gray>Waiting for"
+    - "<dark_gray>a server..."
+  maintenance:
+    - "<dark_gray>[<aqua>{game}<dark_gray>]"
+    - ""
+    - "<dark_red>Maintenance"
+    - ""
+  states:
+    lobby: "<dark_green>▶ Join"
+    full: "<dark_red>Full"
+    ingame: "<gold>In game"
+    starting: "<dark_gray>Starting..."
+
+# NPCs: /cloudnpc create <game> [entity] where you stand. A click queues for
+# the game. Kept in the cloud's database like signs.
+# {game}, {players}, {servers}, {status}
+npcs:
+  label:
+    - "<aqua><bold>{game}"
+    - "<gray>{players} playing"
+    - "{status}"
+  label-height: 2.3
+  status:
+    open: "<green>▶ Click to play"
+    starting: "<yellow>▶ Click to play"
+    maintenance: "<red>Maintenance"
+    offline: "<red>Offline"
+
 movement:
   double-jump: true
   double-jump-power: 1.1
@@ -103,6 +145,7 @@ messages:
   offline: "<red>{game} is not running right now."
   maintenance: "<red>{game} is in maintenance."
   failed: "<red>That did not work: {reason}"
+  server-unavailable: "<red>{server} cannot be joined right now."
   players-shown: "<green>Players are visible again."
   players-hidden: "<gray>Other players are hidden."
   wait: "<red>Wait a moment before doing that again."
