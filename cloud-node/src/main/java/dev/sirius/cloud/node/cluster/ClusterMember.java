@@ -372,7 +372,13 @@ public final class ClusterMember {
                 }
             });
             case "ping" -> {
-                // Keep-alive only; receiving it was the point.
+                // Answered, so the connection carries traffic both ways: each
+                // end has its own read timeout, and a ping alone only keeps
+                // the receiving end busy.
+                replyVia.send(new ClusterPacket("pong", "{}"));
+            }
+            case "pong" -> {
+                // Receiving it was the point.
             }
             default -> LOGGER.debug("Unknown cluster message '{}' from {}", packet.kind(), from);
         }
