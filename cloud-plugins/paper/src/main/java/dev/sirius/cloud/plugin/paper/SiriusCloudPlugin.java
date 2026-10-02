@@ -69,9 +69,8 @@ public final class SiriusCloudPlugin extends JavaPlugin implements Listener {
     private final AtomicBoolean readySent = new AtomicBoolean();
 
     /**
-     * LuckPerms resolves its messaging service while it enables, so the
-     * provider has to be registered before that. {@code loadbefore} in
-     * plugin.yml puts us first; this is the only work that has to happen here.
+     * Offers the cloud to LuckPerms as its messaging service. It registers as
+     * soon as LuckPerms has started, which is after this plugin loads.
      */
     @Override
     public void onLoad() {

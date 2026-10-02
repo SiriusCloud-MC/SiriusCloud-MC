@@ -34,21 +34,18 @@ public final class LuckPermsHook implements MessengerProvider {
      */
     /** Called only through {@link LuckPermsSupport}, never directly. */
     static boolean register() {
+        LuckPerms api;
         try {
-            LuckPerms api = LuckPermsProvider.get();
-            api.registerMessengerProvider(new LuckPermsHook());
-            LOGGER.info("Registered the cloud as a LuckPerms messaging service.");
-            LOGGER.info("Set 'messaging-service: custom' in LuckPerms' config.yml to use it.");
-            return true;
-        } catch (IllegalStateException exception) {
-            // LuckPermsProvider throws this until LuckPerms has loaded. With
-            // loadbefore set that should not happen, but a server owner can
-            // always reorder plugins, and a missing sync is better than a
-            // failed startup.
-            LOGGER.warn("LuckPerms is installed but not ready yet, so cloud-backed "
-                    + "permission syncing is off: {}", exception.getMessage());
+            api = LuckPermsProvider.get();
+        } catch (IllegalStateException notReady) {
+            // LuckPerms has not started yet; LuckPermsSupport tries again.
             return false;
         }
+        // Accepted after LuckPerms has started too: with 'messaging-service:
+        // custom' it switches to this provider the moment it is registered.
+        api.registerMessengerProvider(new LuckPermsHook());
+        LOGGER.info("Registered the cloud as LuckPerms' messaging service ('messaging-service: custom').");
+        return true;
     }
 
     @Override

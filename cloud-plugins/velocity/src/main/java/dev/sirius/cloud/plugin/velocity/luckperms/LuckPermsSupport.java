@@ -37,20 +37,38 @@ public final class LuckPermsSupport {
     /**
      * Registers the cloud as LuckPerms' messaging service, if it is installed.
      *
-     * @return true if the integration is active
+     * <p>LuckPerms only hands out its API once it has started, which on a
+     * server comes after this plugin and on a proxy may come either side of
+     * it. So this keeps trying, once a second for up to a minute, on a thread
+     * of its own - which also means it works on Folia, which has no Bukkit
+     * scheduler.
      */
-    public static boolean enable() {
+    public static void enable() {
         if (!isAvailable()) {
-            return false;
+            return;
         }
-        try {
-            return LuckPermsHook.register();
-        } catch (LinkageError error) {
-            // A LuckPerms whose messenger API differs from the one this was
-            // built against. Worth saying, never worth failing startup for.
-            LOGGER.warn("LuckPerms is installed but its API does not match this build, "
-                    + "so cloud-backed permission syncing is off: {}", error.toString());
-            return false;
-        }
+        Thread.ofVirtual().name("siriuscloud-luckperms").start(() -> {
+            for (int attempt = 0; attempt < 60; attempt++) {
+                try {
+                    // The messenger talks through the cloud, so the cloud has
+                    // to be there first as well as LuckPerms.
+                    if (dev.sirius.cloud.api.driver.CloudDriver.isAvailable() && LuckPermsHook.register()) {
+                        return;
+                    }
+                } catch (LinkageError error) {
+                    // A LuckPerms whose messenger API differs from the one this
+                    // was built against. Worth saying, never worth failing for.
+                    LOGGER.warn("LuckPerms is installed but its API does not match this build, "
+                            + "so cloud-backed permission syncing is off: {}", error.toString());
+                    return;
+                }
+                try {
+                    Thread.sleep(1000);
+                } catch (InterruptedException interrupted) {
+                    return;
+                }
+            }
+            LOGGER.warn("LuckPerms or the cloud did not start within a minute, so cloud-backed permission syncing is off.");
+        });
     }
 }

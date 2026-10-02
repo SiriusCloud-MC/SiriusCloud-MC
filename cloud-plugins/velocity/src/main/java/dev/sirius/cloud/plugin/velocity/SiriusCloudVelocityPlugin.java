@@ -191,9 +191,8 @@ public final class SiriusCloudVelocityPlugin {
                 connection.nodeHost(), connection.nodePort(), connection.serviceName());
 
         // Last, and deliberately: an optional integration must not be able to
-        // take the rest of initialisation down with it. Velocity has no
-        // loadbefore, so this may also land after LuckPerms has already
-        // resolved its messenger - LuckPermsSupport says what to do if so.
+        // take the rest of initialisation down with it. LuckPerms may start
+        // either side of this plugin; registration waits for it either way.
         LuckPermsSupport.enable();
     }
 
