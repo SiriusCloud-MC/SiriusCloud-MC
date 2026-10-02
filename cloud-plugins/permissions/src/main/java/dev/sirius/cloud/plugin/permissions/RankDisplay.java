@@ -1,8 +1,6 @@
 package dev.sirius.cloud.plugin.permissions;
 
 import dev.sirius.cloud.api.permission.PermissionDisplay;
-import dev.sirius.cloud.api.permission.PermissionGroup;
-import dev.sirius.cloud.api.permission.PermissionResolver;
 import dev.sirius.cloud.api.permission.PermissionSnapshot;
 import io.papermc.paper.chat.ChatRenderer;
 import io.papermc.paper.event.player.AsyncChatEvent;
@@ -41,21 +39,35 @@ final class RankDisplay implements Listener {
     /** Only teams with this prefix are ours to create, change and remove. */
     private static final String TEAM_PREFIX = "sc_";
 
-    private static final LegacyComponentSerializer LEGACY = LegacyComponentSerializer.legacyAmpersand();
+    /** {@code &} codes, and {@code &#rrggbb} as LuckPerms prefixes often use. */
+    private static final LegacyComponentSerializer LEGACY = LegacyComponentSerializer.builder()
+            .character('&').hexColors().build();
 
     private final Supplier<PermissionSnapshot> snapshot;
+    private final RankSource ranks;
 
-    RankDisplay(Supplier<PermissionSnapshot> snapshot) {
+    /**
+     * @param snapshot the cloud's permission data, for the display settings
+     * @param ranks    where ranks come from: the cloud's groups, or LuckPerms
+     */
+    RankDisplay(Supplier<PermissionSnapshot> snapshot, RankSource ranks) {
         this.snapshot = snapshot;
+        this.ranks = ranks;
+    }
+
+    /** The node's display settings, or the defaults until (or unless) they arrive. */
+    private PermissionDisplay settings() {
+        PermissionSnapshot current = snapshot.get();
+        return current == null ? new PermissionDisplay() : current.display();
     }
 
     /** Main thread only: teams and tab names are server state. */
-    void apply(Player player, PermissionSnapshot current) {
-        PermissionDisplay display = current.display();
-        Optional<PermissionGroup> group = PermissionResolver.highest(current, player.getUniqueId());
-        String prefix = group.map(PermissionGroup::prefix).orElse("");
-        String suffix = group.map(PermissionGroup::suffix).orElse("");
-        boolean decorated = !prefix.isEmpty() || !suffix.isEmpty();
+    void apply(Player player) {
+        PermissionDisplay display = settings();
+        RankSource.Rank rank = ranks.rank(player);
+        String prefix = rank.prefix();
+        String suffix = rank.suffix();
+        boolean decorated = rank.decorated();
 
         // Colour codes carry on, so the name takes the prefix's last colour.
         Component name = LEGACY.deserialize(prefix + player.getName() + suffix);
@@ -64,14 +76,14 @@ final class RankDisplay implements Listener {
 
         Scoreboard board = Bukkit.getScoreboardManager().getMainScoreboard();
         Team existing = board.getEntryTeam(player.getName());
-        if (!display.nametags() || group.isEmpty()) {
+        if (!display.nametags() || rank.key() == null) {
             if (existing != null && existing.getName().startsWith(TEAM_PREFIX)) {
                 existing.removeEntry(player.getName());
             }
             return;
         }
 
-        Team team = team(board, group.get());
+        Team team = team(board, rank);
         team.prefix(LEGACY.deserialize(prefix));
         team.suffix(LEGACY.deserialize(suffix));
         team.color(lastColor(prefix).orElse(NamedTextColor.WHITE));
@@ -115,14 +127,14 @@ final class RankDisplay implements Listener {
      */
     @EventHandler(priority = EventPriority.NORMAL, ignoreCancelled = true)
     public void onChat(AsyncChatEvent event) {
-        PermissionSnapshot current = snapshot.get();
-        if (current == null || !current.display().chat()) {
+        PermissionDisplay display = settings();
+        if (!display.chat()) {
             return;
         }
-        Optional<PermissionGroup> group = PermissionResolver.highest(current, event.getPlayer().getUniqueId());
-        String format = current.display().chatFormat()
-                .replace("{prefix}", group.map(PermissionGroup::prefix).orElse(""))
-                .replace("{suffix}", group.map(PermissionGroup::suffix).orElse(""))
+        RankSource.Rank rank = ranks.rank(event.getPlayer());
+        String format = display.chatFormat()
+                .replace("{prefix}", rank.prefix())
+                .replace("{suffix}", rank.suffix())
                 .replace("{name}", event.getPlayer().getName());
 
         int split = format.indexOf("{message}");
@@ -139,10 +151,10 @@ final class RankDisplay implements Listener {
         }));
     }
 
-    private static Team team(Scoreboard board, PermissionGroup group) {
+    private static Team team(Scoreboard board, RankSource.Rank group) {
         // Highest priority sorts first, and team names are what tab sorts by.
-        int rank = 999 - Math.max(0, Math.min(999, group.priority()));
-        String key = group.name().toLowerCase(Locale.ROOT);
+        int rank = 999 - Math.max(0, Math.min(999, group.weight()));
+        String key = group.key().toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_]", "");
         String name = TEAM_PREFIX + String.format(Locale.ROOT, "%03d", rank)
                 + key.substring(0, Math.min(key.length(), 10));
         Team team = board.getTeam(name);
@@ -156,6 +168,15 @@ final class RankDisplay implements Listener {
             char marker = legacy.charAt(index);
             if (marker != '&' && marker != LegacyComponentSerializer.SECTION_CHAR) {
                 continue;
+            }
+            // &#rrggbb: the closest of the sixteen colours a team can have.
+            if (legacy.charAt(index + 1) == '#' && index + 8 <= legacy.length()) {
+                TextColor hex = TextColor.fromHexString(legacy.substring(index + 1, index + 8));
+                if (hex != null) {
+                    found = NamedTextColor.nearestTo(hex);
+                    index += 7;
+                    continue;
+                }
             }
             LegacyFormat format = LegacyComponentSerializer.parseChar(legacy.charAt(index + 1));
             if (format == null) {

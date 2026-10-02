@@ -21,6 +21,8 @@ dependencies {
     compileOnly(project(":cloud-api"))
     compileOnly(libs.paper.api)
     compileOnly(libs.gson)
+    // Optional: with LuckPerms installed, ranks are shown from it instead.
+    compileOnly(libs.luckperms.api)
 }
 
 tasks.jar {

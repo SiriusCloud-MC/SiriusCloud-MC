@@ -73,7 +73,7 @@ public final class PermissionsModule implements CloudModule {
 
         LOGGER.info("Serving {} group(s) at revision {}",
                 store.snapshot().groups().size(), store.revision());
-        warnAboutLuckPerms();
+        explainLuckPerms();
     }
 
     @Override
@@ -156,16 +156,15 @@ public final class PermissionsModule implements CloudModule {
     }
 
     /**
-     * Says the quiet part out loud.
-     *
-     * <p>Both this and the LuckPerms bridge want to be the permission
-     * authority. Running them together produces a server where a rank appears
-     * to apply and then does not, depending on which plugin attached last, and
-     * that is a miserable thing to debug from the symptom.
+     * Says what these groups mean on a network that also runs LuckPerms,
+     * since it is the first thing anybody mixing the two will wonder.
      */
-    private void warnAboutLuckPerms() {
-        LOGGER.warn("If your servers run LuckPerms, use one system or the other.");
-        LOGGER.warn("Two things managing the same permissions will contradict each other.");
+    private void explainLuckPerms() {
+        // The permissions plugin steps aside on servers that run LuckPerms,
+        // and only shows its ranks there, so there is nothing to warn about -
+        // but the groups below are then not what decides anything.
+        LOGGER.info("On servers with LuckPerms, LuckPerms decides permissions and these groups are not used;"
+                + " the display settings in config.json still apply.");
     }
 
     static String string(JsonObject body, String key) {

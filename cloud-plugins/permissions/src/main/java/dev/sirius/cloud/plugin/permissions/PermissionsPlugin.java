@@ -40,6 +40,7 @@ public final class PermissionsPlugin extends JavaPlugin implements Listener {
 
     private PermissionApplier applier;
     private RankDisplay display;
+    private boolean luckPerms;
 
     /** The latest snapshot. Null until the node answers our first request. */
     private volatile PermissionSnapshot snapshot;
@@ -55,8 +56,14 @@ public final class PermissionsPlugin extends JavaPlugin implements Listener {
             return;
         }
 
+        // With LuckPerms installed, it owns permissions on this server; this
+        // plugin then only shows its ranks, in the format set on the node.
+        luckPerms = getServer().getPluginManager().getPlugin("LuckPerms") != null;
         applier = new PermissionApplier(this);
-        display = new RankDisplay(() -> snapshot);
+        RankSource ranks = luckPerms
+                ? new LuckPermsRanks(this, this::rankChanged)
+                : new CloudRanks(() -> snapshot);
+        display = new RankDisplay(() -> snapshot, ranks);
         // Left behind by a crash: the main scoreboard is saved with the world.
         display.removeAllTeams();
 
@@ -68,15 +75,28 @@ public final class PermissionsPlugin extends JavaPlugin implements Listener {
         getServer().getPluginManager().registerEvents(this, this);
         getServer().getPluginManager().registerEvents(display, this);
 
-        PermsCommand command = new PermsCommand(this);
         var registered = getCommand("perms");
-        if (registered != null) {
+        if (registered != null && luckPerms) {
+            registered.setExecutor((sender, command, label, args) -> {
+                sender.sendMessage(legacy().deserialize(
+                        "&cLuckPerms manages permissions on this server. Use &f/lp&c."));
+                return true;
+            });
+        } else if (registered != null) {
+            PermsCommand command = new PermsCommand(this);
             registered.setExecutor(command);
             registered.setTabCompleter(command);
         }
 
         startRequestRetry();
-        getLogger().info("Waiting for the cloud's permission data.");
+        if (luckPerms) {
+            getLogger().info("LuckPerms is installed: it manages permissions, and its ranks are shown in chat,"
+                    + " above heads and in the tab list.");
+            // Shown with the default settings until the node's arrive.
+            Bukkit.getOnlinePlayers().forEach(display::apply);
+        } else {
+            getLogger().info("Waiting for the cloud's permission data.");
+        }
     }
 
     @Override
@@ -115,8 +135,17 @@ public final class PermissionsPlugin extends JavaPlugin implements Listener {
      * a long time to have every player holding nothing.
      */
     private void startRequestRetry() {
+        int[] attempts = {0};
         Bukkit.getScheduler().runTaskTimer(this, task -> {
             if (snapshot != null) {
+                task.cancel();
+                return;
+            }
+            // With LuckPerms only the display settings are missing, and the
+            // node may simply not run the permissions module: stop asking.
+            if (luckPerms && ++attempts[0] > 20) {
+                getLogger().info("No display settings from the node; using the defaults. Enable its permissions"
+                        + " module to change them.");
                 task.cancel();
                 return;
             }
@@ -151,8 +180,10 @@ public final class PermissionsPlugin extends JavaPlugin implements Listener {
         // Both touch Bukkit state, and snapshots arrive on a Netty thread.
         Bukkit.getScheduler().runTask(this, () -> {
             Bukkit.getOnlinePlayers().forEach(player -> {
-                applier.apply(player, incoming);
-                display.apply(player, incoming);
+                if (!luckPerms) {
+                    applier.apply(player, incoming);
+                }
+                display.apply(player);
             });
             display.pruneEmptyTeams();
         });
@@ -198,8 +229,24 @@ public final class PermissionsPlugin extends JavaPlugin implements Listener {
         return snapshot;
     }
 
+    /** LuckPerms recalculated a player, or everyone when {@code player} is null. Main thread. */
+    private void rankChanged(org.bukkit.entity.Player player) {
+        if (player == null) {
+            Bukkit.getOnlinePlayers().forEach(display::apply);
+            display.pruneEmptyTeams();
+        } else {
+            display.apply(player);
+        }
+    }
+
     @EventHandler(priority = EventPriority.LOWEST)
     public void onJoin(PlayerJoinEvent event) {
+        if (luckPerms) {
+            // LuckPerms has the player loaded by now, and the display works
+            // with default settings until the node's arrive.
+            display.apply(event.getPlayer());
+            return;
+        }
         PermissionSnapshot current = snapshot;
         if (current == null) {
             // The node has not answered yet. Ask again rather than leaving this
@@ -208,7 +255,7 @@ public final class PermissionsPlugin extends JavaPlugin implements Listener {
             return;
         }
         applier.apply(event.getPlayer(), current);
-        display.apply(event.getPlayer(), current);
+        display.apply(event.getPlayer());
     }
 
     @EventHandler
